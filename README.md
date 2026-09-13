@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting.** Email delivery retries, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting + Phase 11 analytics.** Email delivery remains stubbed (retries deferred); a frontend is still out of scope.
 
 ## Architecture
 
@@ -690,16 +690,17 @@ Set `JOBPILOT_REDIS_ENABLED=false` to skip Redis entirely: Spring Cache uses `Co
 | --- | --- | --- | --- |
 | `recommendations` | `userId:limit` (limit normalized, default 10, max 100) | 120s | `GET /api/recommendations` |
 | `applicationMatch` | `userId:applicationId` | 180s | `GET /api/applications/{id}/match` |
+| `analytics` | `userId:summary` / `userId:funnel` | 60s | `GET /api/analytics/summary`, `GET /api/analytics/funnel` |
 
 Domain services use only `@Cacheable` / `CacheEviction` — no Redis types leak into `application`, `recommendation`, `skill`, or `jobanalysis`.
 
 Eviction (same behavior with in-memory or Redis):
 
-- Application create / update / delete → user's `recommendations`
+- Application create / update / delete → user's `recommendations` + `analytics`
 - Application delete, or `jobDescription` change → that `applicationMatch`
-- Skill add / delete → user's `recommendations` and all of their `applicationMatch` entries
-- Analyze (and first-time persist on match GET) → that `applicationMatch` + user `recommendations`
-- Interview create / update / delete → user's `recommendations`
+- Skill add / delete → user's `recommendations`, all of their `applicationMatch` entries, and `analytics`
+- Analyze (and first-time persist on match GET) → that `applicationMatch` + user `recommendations` + `analytics`
+- Interview create / update / delete → user's `recommendations` + `analytics`
 
 When Redis prefix-scan is unavailable, eviction of "all keys for a user" falls back to clearing that cache name. TTLs are short, so that is acceptable.
 
@@ -727,6 +728,56 @@ On exceed: **HTTP 429** with the standard error JSON (`timestamp`, `status`, `er
 - Rate-limit defaults in tests are raised to 10000/min so existing flows do not trip 429
 - Dedicated tests set low limits via `@TestPropertySource` and assert 429 in in-memory mode
 
+## Phase 11 — Analytics
+
+Read-only aggregations over the **authenticated user's** job-search data (applications, interviews, job requirements vs skills). No LLM. No new Flyway migration — queries hit existing tables via Spring Data JPA / JPQL. User id always comes from the JWT / `SecurityContext`, never from the client.
+
+### Definitions
+
+| Term | Meaning |
+| --- | --- |
+| **Active applications** | Status is **not** `REJECTED` or `WITHDRAWN` |
+| **Funnel stages** | Ordered snapshot of current status counts: `SAVED → APPLIED → OA → INTERVIEW → OFFER`. Counts are **not** cumulative historical reach. |
+| **Conversion rate** | For stage _n_: `count(n) / count(n-1)` when previous count &gt; 0; otherwise `null`. First stage has `null`. |
+| **averageMatchScore** | Mean of live `JobMatchEngine` scores for applications that have stored `job_requirements`. Match scores are **not** persisted; recomputed against the user's current skills. `null` when no analyzed apps. |
+| **Timeline buckets** | `DAY` = calendar day UTC; `WEEK` = Monday-start ISO week UTC; `MONTH` = first day of month UTC. Default range: last **12 weeks** ending today (UTC) when `from`/`to` omitted. |
+| **applicationsCreated / applicationsApplied** | Bucketed by `createdAt` / `appliedAt` respectively. Apps with null `appliedAt` do not appear in the applied series. |
+
+`REJECTED` and `WITHDRAWN` appear as funnel **side stats** (`rejectedCount`, `withdrawnCount`), not as main stages.
+
+### Endpoints
+
+All require JWT.
+
+```bash
+TOKEN=... # from /api/auth/login or register
+
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/analytics/summary | jq
+
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/analytics/funnel | jq
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8080/api/analytics/timeline?bucket=WEEK" | jq
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8080/api/analytics/timeline?bucket=DAY&from=2026-06-01&to=2026-09-13" | jq
+
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/analytics/skills-gap | jq
+```
+
+| Method | Path | Response highlights |
+| --- | --- | --- |
+| `GET` | `/api/analytics/summary` | `totalApplications`, `countsByStatus[]`, `interviewCount`, `offerCount`, `rejectedCount`, `averageMatchScore`, `activeApplications` |
+| `GET` | `/api/analytics/funnel` | `stages[]` (`status`, `count`, `conversionFromPrevious`), `rejectedCount`, `withdrawnCount` |
+| `GET` | `/api/analytics/timeline` | Query: `bucket=DAY\|WEEK\|MONTH` (default `WEEK`), optional `from`/`to` ISO dates. Body: `points[]` with `periodStart`, `applicationsCreated`, `applicationsApplied` |
+| `GET` | `/api/analytics/skills-gap` | Top missing skills across analyzed applications (`skillName`, `missingCount`), max 20 |
+
+Summary and funnel responses are cached under the `analytics` cache (60s TTL when Redis is on), keyed by user id, and evicted on application / interview / skill / analyze writes.
+
+### Tests without Redis (or Kafka)
+
+Same as Phase 10: `./gradlew test` uses in-memory H2 + in-memory cache/rate-limit stores. Analytics integration tests cover status mixes, interview counts, timeline totals, skills-gap, and cross-user isolation.
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory cache/rate-limit stores, so they do not require Docker.
@@ -738,7 +789,11 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory
 
 ## Planned later phases (not implemented)
 
-Phases 11–13 are planned and **not** present here. Expected later work includes email delivery with retries, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+- **Phase 12** — frontend (UI for applications, interviews, analytics)
+- **Phase 13** — hardening / CI (broader integration coverage, production ops polish)
+- Email delivery with retries remains deferred — notifications stay in-app; the email provider is still stubbed
+
+Do not treat unimplemented future work as working features.
 
 ## License
 

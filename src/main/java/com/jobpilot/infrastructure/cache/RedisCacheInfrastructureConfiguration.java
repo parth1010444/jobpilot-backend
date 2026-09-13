@@ -76,11 +76,16 @@ public class RedisCacheInfrastructureConfiguration {
         Map<String, RedisCacheConfiguration> perCache = new HashMap<>();
         perCache.put(CacheNames.RECOMMENDATIONS, defaults.entryTtl(cacheProperties.getRecommendationsTtl()));
         perCache.put(CacheNames.APPLICATION_MATCH, defaults.entryTtl(cacheProperties.getApplicationMatchTtl()));
+        perCache.put(CacheNames.ANALYTICS, defaults.entryTtl(cacheProperties.getAnalyticsTtl()));
 
         return RedisCacheManager.builder(redisConnectionFactory)
                 .cacheDefaults(defaults)
                 .withInitialCacheConfigurations(perCache)
-                .initialCacheNames(Set.of(CacheNames.RECOMMENDATIONS, CacheNames.APPLICATION_MATCH))
+                .initialCacheNames(Set.of(
+                        CacheNames.RECOMMENDATIONS,
+                        CacheNames.APPLICATION_MATCH,
+                        CacheNames.ANALYTICS
+                ))
                 .build();
     }
 

@@ -15,7 +15,11 @@ class CacheEvictionServiceTest {
 
     @BeforeEach
     void setUp() {
-        cacheManager = new ConcurrentMapCacheManager(CacheNames.RECOMMENDATIONS, CacheNames.APPLICATION_MATCH);
+        cacheManager = new ConcurrentMapCacheManager(
+                CacheNames.RECOMMENDATIONS,
+                CacheNames.APPLICATION_MATCH,
+                CacheNames.ANALYTICS
+        );
         eviction = new CacheEvictionService(cacheManager);
     }
 
@@ -48,5 +52,21 @@ class CacheEvictionServiceTest {
 
         assertThat(cache.get(CacheNames.applicationMatchKey(user, app))).isNull();
         assertThat(cache.get(CacheNames.applicationMatchKey(user, otherApp)).get()).isEqualTo(7);
+    }
+
+    @Test
+    void evictsOnlyThatUsersAnalyticsKeys() {
+        UUID user = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        UUID other = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        Cache cache = cacheManager.getCache(CacheNames.ANALYTICS);
+        cache.put(user + ":summary", "mine");
+        cache.put(user + ":funnel", "mine-funnel");
+        cache.put(other + ":summary", "theirs");
+
+        eviction.evictUserAnalytics(user);
+
+        assertThat(cache.get(user + ":summary")).isNull();
+        assertThat(cache.get(user + ":funnel")).isNull();
+        assertThat(cache.get(other + ":summary").get()).isEqualTo("theirs");
     }
 }

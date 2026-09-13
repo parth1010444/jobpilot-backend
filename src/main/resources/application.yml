@@ -85,6 +85,7 @@ jobpilot:
   cache:
     recommendations-ttl: ${JOBPILOT_CACHE_RECOMMENDATIONS_TTL:120s}
     application-match-ttl: ${JOBPILOT_CACHE_APPLICATION_MATCH_TTL:180s}
+    analytics-ttl: ${JOBPILOT_CACHE_ANALYTICS_TTL:60s}
   rate-limit:
     enabled: ${JOBPILOT_RATE_LIMIT_ENABLED:true}
     default-limit: ${JOBPILOT_RATE_LIMIT_DEFAULT:100}

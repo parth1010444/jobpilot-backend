@@ -35,6 +35,11 @@ public class CacheEvictionService implements CacheEviction {
         evictByPrefix(CacheNames.APPLICATION_MATCH, userId.toString());
     }
 
+    @Override
+    public void evictUserAnalytics(UUID userId) {
+        evictByPrefix(CacheNames.ANALYTICS, userId.toString());
+    }
+
     /**
      * ConcurrentMap (test / Redis-disabled): drop keys that start with the user id.
      * Redis / unknown native cache: {@link Cache#clear()} the whole name. TTLs are

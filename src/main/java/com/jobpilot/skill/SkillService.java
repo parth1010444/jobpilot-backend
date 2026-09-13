@@ -45,6 +45,7 @@ public class SkillService {
         }
         cacheEviction.evictUserRecommendations(userId);
         cacheEviction.evictUserApplicationMatches(userId);
+        cacheEviction.evictUserAnalytics(userId);
         return SkillResponse.from(skill);
     }
 
@@ -53,6 +54,7 @@ public class SkillService {
         skillRepository.delete(requireOwned(userId, id));
         cacheEviction.evictUserRecommendations(userId);
         cacheEviction.evictUserApplicationMatches(userId);
+        cacheEviction.evictUserAnalytics(userId);
     }
 
     private Skill requireOwned(UUID userId, UUID id) {

@@ -12,12 +12,14 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code recommendations} — {@code userId:limit} (limit is normalized)</li>
  *   <li>{@code applicationMatch} — {@code userId:applicationId}</li>
+ *   <li>{@code analytics} — {@code userId:summary} / {@code userId:funnel}</li>
  * </ul>
  */
 public final class CacheNames {
 
     public static final String RECOMMENDATIONS = "recommendations";
     public static final String APPLICATION_MATCH = "applicationMatch";
+    public static final String ANALYTICS = "analytics";
 
     static final int DEFAULT_RECOMMENDATION_LIMIT = 10;
     static final int MAX_RECOMMENDATION_LIMIT = 100;
