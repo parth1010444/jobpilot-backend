@@ -1,8 +1,10 @@
 # JobPilot
 
+[![CI](https://github.com/parth1010444/jobpilot-backend/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/parth1010444/jobpilot-backend/actions/workflows/ci.yml)
+
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting + Phase 11 analytics.** Email delivery remains stubbed (retries deferred); a frontend is still out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting + Phase 11 analytics + Phase 13 hardening / CI.** Email delivery remains stubbed (retries deferred); a frontend (Phase 12) is still out of scope. CORS is already configured for a local Vite origin.
 
 ## Architecture
 
@@ -13,9 +15,10 @@ flowchart TB
   client[HTTP clients / later frontend]
   subgraph api [HTTP edge]
     controllers[Thin controllers]
-    security[Spring Security + JWT]
+    security[Spring Security + JWT + CORS]
     advice[GlobalExceptionHandler]
     actuator[Actuator /health]
+    openapi[OpenAPI / Swagger UI]
   end
   subgraph modules [Domain modules]
     auth[auth]
@@ -44,6 +47,7 @@ flowchart TB
 
   client --> controllers
   client --> actuator
+  client --> openapi
   client --> security
   security --> controllers
   controllers --> modules
@@ -68,11 +72,12 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Build | Gradle (Kotlin DSL) |
 | Persistence | Spring Data JPA + Flyway |
 | Database | PostgreSQL 16 (H2 for tests) |
-| Security | Spring Security + JWT (jjwt) + BCrypt |
+| Security | Spring Security + JWT (jjwt) + BCrypt + CORS + security headers |
 | Messaging | Spring Kafka + transactional outbox |
 | Cache / rate limit | Spring Cache + Redis (in-memory fallback when Redis is disabled) |
-| Ops | Spring Boot Actuator (`/actuator/health`) |
-| Packaging | Dockerfile + Docker Compose |
+| API docs | springdoc-openapi (`/swagger-ui.html`, `/v3/api-docs`) — disabled on `prod` |
+| Ops | Spring Boot Actuator (`/actuator/health` only) + GitHub Actions CI |
+| Packaging | Multi-stage Dockerfile (non-root) + Docker Compose |
 
 Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql` … `V7__reminders_and_notifications.sql`, `V8__outbox_events.sql`). Phase 10 adds no Flyway migration — cache and rate-limit state live in Redis (or process memory).
 
@@ -103,8 +108,10 @@ Copy [`.env.example`](.env.example) to `.env` and adjust. Nothing secret is comm
 | `JOBPILOT_RATE_LIMIT_DEFAULT` | Global API requests per identity per window | `100` |
 | `JOBPILOT_RATE_LIMIT_AUTH` | `/api/auth/**` requests per IP per window | `10` |
 | `JOBPILOT_RATE_LIMIT_WINDOW` | Fixed window | `1m` |
+| `JOBPILOT_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins | `http://localhost:5173,http://127.0.0.1:5173` (empty on `prod` until set) |
+| `JOBPILOT_OPENAPI_ENABLED` | Publish Swagger UI + `/v3/api-docs` | `true` (forced `false` on `prod`) |
 
-> **Production:** you **must** set `JOBPILOT_JWT_SECRET` to a long random value (e.g. `openssl rand -base64 48`). The YAML default is for local development and tests only.
+> **Production:** set `SPRING_PROFILES_ACTIVE=prod` and **must** set `JOBPILOT_JWT_SECRET` to a long random value (e.g. `openssl rand -base64 48`). The YAML default is for local development and tests only; the `prod` profile refuses to start with a missing, short, or local-default secret. Also set `JOBPILOT_CORS_ALLOWED_ORIGINS` to your real frontend origin(s). See [Phase 13](#phase-13--hardening--ci).
 
 ## Local run
 
@@ -133,7 +140,8 @@ Or with the local profile (more verbose SQL logging):
 Useful URLs:
 
 - `GET /api/v1/ping` — trivial ping (public)
-- `GET /actuator/health` — Actuator health (public)
+- `GET /actuator/health` — Actuator health (public; other actuator endpoints are not exposed)
+- `GET /swagger-ui.html` / `GET /v3/api-docs` — OpenAPI (public when `jobpilot.openapi.enabled=true`; off on `prod`)
 - `POST /api/auth/register` / `POST /api/auth/login` — auth (public)
 - `GET /api/users/me` — current user (requires `Authorization: Bearer <token>`)
 - `/api/applications` — application CRUD (requires Bearer JWT)
@@ -716,7 +724,7 @@ When Redis prefix-scan is unavailable, eviction of "all keys for a user" falls b
 
 IP resolution: first `X-Forwarded-For` hop, else `X-Real-IP`, else `remoteAddr`.
 
-**Excluded:** `GET /actuator/health` (+ `/actuator/health/**`) and `GET /api/v1/ping`.
+**Excluded:** `GET /actuator/health` (+ `/actuator/health/**`), `GET /api/v1/ping`, and OpenAPI/Swagger (`/v3/api-docs`, `/swagger-ui.html`, `/swagger-ui/**`).
 
 On exceed: **HTTP 429** with the standard error JSON (`timestamp`, `status`, `error`, `message`, `path`) and a `Retry-After` header (seconds remaining in the window). Counters are a **fixed window**. Redis uses atomic `INCR` + `PEXPIRE`; when Redis is disabled the same window math runs in a `ConcurrentHashMap`.
 
@@ -780,17 +788,81 @@ Same as Phase 10: `./gradlew test` uses in-memory H2 + in-memory cache/rate-limi
 
 ## Tests and build
 
-Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory cache/rate-limit stores, so they do not require Docker.
+Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory cache/rate-limit stores, so they do not require Docker. GitHub Actions runs the same commands on PRs and pushes to `dev` / `main`.
 
 ```bash
 ./gradlew test
 ./gradlew build
 ```
 
+## Phase 13 — Hardening + CI
+
+Portfolio-oriented production polish. No new domain APIs.
+
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pull requests and pushes to `dev` and `main`:
+
+- Temurin JDK 21 + Gradle cache
+- Gradle wrapper validation
+- `./gradlew test` then `./gradlew assemble`
+- Fails the job if any test fails
+- Uses existing H2 / in-memory tests — **does not** start Kafka, Redis, or Postgres
+
+Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) opens weekly PRs for Gradle and GitHub Actions.
+
+### CORS
+
+`CorsConfigurationSource` is wired into Spring Security (`.cors(Customizer.withDefaults())`). Defaults allow a local Vite frontend:
+
+- `http://localhost:5173`
+- `http://127.0.0.1:5173`
+
+Override with `JOBPILOT_CORS_ALLOWED_ORIGINS` (comma-separated). Credentials are allowed; `Authorization` and `Retry-After` are exposed. Disallowed origins do not receive `Access-Control-Allow-Origin`. On `prod` the default origin list is empty — you must set the env var.
+
+### Security headers
+
+Spring Security sends its default headers plus explicit:
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- HSTS (`max-age=31536000`; includeSubDomains + preload) on HTTPS responses only
+
+CSRF stays disabled (stateless JWT API). Sessions are stateless.
+
+### Actuator lockdown
+
+Only `GET /actuator/health` is exposed and anonymous. Every other actuator id has default access `none` and is omitted from `management.endpoints.web.exposure.include`. Health details stay hidden (`show-details: never`). Prometheus / metrics are **not** exposed.
+
+### OpenAPI
+
+[springdoc-openapi](https://springdoc.org/) is on the classpath.
+
+| URL | Notes |
+| --- | --- |
+| `/v3/api-docs` | OpenAPI 3 JSON |
+| `/swagger-ui.html` | Swagger UI (redirects to `/swagger-ui/index.html`) |
+
+Enabled by default for local/test (`JOBPILOT_OPENAPI_ENABLED=true`). The `prod` profile sets `jobpilot.openapi.enabled=false` and turns springdoc off; those paths then require authentication and have no handler.
+
+### Container image
+
+The Dockerfile is multi-stage (JDK 21 build → JRE 21 runtime) and runs as a non-root `jobpilot` user. The boot jar is copied as a single named file (`jobpilot.jar`). Compose `--profile app` is unchanged.
+
+### Production checklist
+
+Before deploying with `SPRING_PROFILES_ACTIVE=prod`:
+
+1. Set `JOBPILOT_JWT_SECRET` to a long random value (`openssl rand -base64 48`). Do **not** ship the local YAML default — startup fails if the secret is missing, shorter than 32 characters, or still the `local-dev-only` placeholder.
+2. Set `JOBPILOT_CORS_ALLOWED_ORIGINS` to the real frontend origin(s). Do not leave it empty if browsers will call the API.
+3. Confirm Swagger is off (`JOBPILOT_OPENAPI_ENABLED` is ignored on `prod`; springdoc is disabled).
+4. Override Postgres / Redis passwords; do not use compose `changeme` defaults.
+5. Run Postgres, Kafka, and Redis via Compose or managed services — tests use H2 only.
+6. Keep actuator limited to `/actuator/health` for probes.
+
 ## Planned later phases (not implemented)
 
-- **Phase 12** — frontend (UI for applications, interviews, analytics)
-- **Phase 13** — hardening / CI (broader integration coverage, production ops polish)
+- **Phase 12** — frontend (UI for applications, interviews, analytics). CORS already allows local Vite origins.
 - Email delivery with retries remains deferred — notifications stay in-app; the email provider is still stubbed
 
 Do not treat unimplemented future work as working features.

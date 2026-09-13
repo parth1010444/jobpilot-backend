@@ -82,6 +82,15 @@ class RateLimitFilterTest {
     }
 
     @Test
+    void openApiPathsAreExcluded() {
+        assertThat(RateLimitFilter.isExcluded("/v3/api-docs")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/v3/api-docs.yaml")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/swagger-ui.html")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/swagger-ui/index.html")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/api/users/me")).isFalse();
+    }
+
+    @Test
     void authenticatedUserIsKeyedByUserId() throws Exception {
         UUID userId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         authenticate(userId);

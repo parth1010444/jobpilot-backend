@@ -21,8 +21,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * present, otherwise the client IP ({@code X-Forwarded-For} first hop, then
  * {@code X-Real-IP}, then {@code remoteAddr}).
  *
- * <p>{@code /api/auth/**} uses the stricter auth limit (per IP). Actuator health
- * and {@code /api/v1/ping} are excluded.
+ * <p>{@code /api/auth/**} uses the stricter auth limit (per IP). Actuator health,
+ * {@code /api/v1/ping}, and OpenAPI/Swagger paths are excluded.
  *
  * <p>Must run after {@code JwtAuthenticationFilter} so {@link SecurityContextHolder}
  * is populated. Registered only on the security chain (servlet registration disabled).
@@ -61,7 +61,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
         return path.equals("/actuator/health")
                 || path.startsWith("/actuator/health/")
-                || path.equals("/api/v1/ping");
+                || path.equals("/api/v1/ping")
+                || path.equals("/v3/api-docs")
+                || path.startsWith("/v3/api-docs/")
+                || path.equals("/swagger-ui.html")
+                || path.startsWith("/swagger-ui/");
     }
 
     @Override

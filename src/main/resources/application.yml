@@ -50,18 +50,35 @@ server:
 
 management:
   endpoints:
+    access:
+      default: none
     web:
       exposure:
         include: health
   endpoint:
     health:
+      access: unrestricted
       show-details: never
   info:
     env:
       enabled: false
 
+springdoc:
+  api-docs:
+    enabled: ${JOBPILOT_OPENAPI_ENABLED:true}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${JOBPILOT_OPENAPI_ENABLED:true}
+    path: /swagger-ui.html
+
 # JWT — local/test defaults only. Production MUST override JOBPILOT_JWT_SECRET.
 jobpilot:
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+  openapi:
+    enabled: ${JOBPILOT_OPENAPI_ENABLED:true}
   jwt:
     secret: ${JOBPILOT_JWT_SECRET:local-dev-only-change-me-use-a-long-random-secret-at-least-32-bytes}
     expiration-ms: ${JOBPILOT_JWT_EXPIRATION_MS:86400000}
