@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -381,6 +381,91 @@ curl -sS -X PATCH http://localhost:8080/api/applications/<applicationId> \
   -d '{"version":0,"resumeId":"<resumeId>"}'
 ```
 
+## Phase 6 — Job description analyzer + match engine
+
+Deterministic, **no-LLM** skill extraction from free-text job descriptions, plus an explainable overlap score against the current user's skills. Useful for demos and as a stable baseline before any future ML/LLM analyzer.
+
+### Analyzer
+
+`JobDescriptionAnalyzer` abstracts extraction. The Phase 6 implementation is `RuleBasedJobDescriptionAnalyzer`: case-insensitive keyword/alias matching against a curated `SkillDictionary` (Java, Spring Boot, Kafka, PostgreSQL/postgres, Redis, Docker, AWS, Kubernetes/k8s, System Design, and more). Aliases map to **canonical lowercase** skill names (aligned with Phase 5 skill normalization). Word-boundary matching avoids false positives such as `java` inside `javascript`.
+
+Optional persistence: table `job_requirements` (`application_id`, `skill_name`, `created_at`) via Flyway `V6__job_analysis.sql`. Re-analyze **replaces** rows for that application.
+
+### Match score formula
+
+Compare extracted/stored required skills vs the current user's skills from `SkillRepository`:
+
+- If `requiredSkills` is empty → `score = 100` and `matchedSkills` / `missingSkills` / `requiredSkills` are all empty lists.
+- Otherwise:
+
+```text
+score = round(100.0 * matchedSkills.size() / max(requiredSkills.size(), 1))
+```
+
+This is **coverage of required skills**, not a hiring probability.
+
+Example response:
+
+```json
+{
+  "score": 71,
+  "matchedSkills": ["docker", "java", "kafka", "kubernetes", "redis"],
+  "missingSkills": ["postgresql", "spring boot"],
+  "requiredSkills": ["docker", "java", "kafka", "kubernetes", "postgresql", "redis", "spring boot"]
+}
+```
+
+### APIs (authenticated, user-isolated)
+
+Ownership is always taken from `SecurityContext`. Another user's application → **404**.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/api/applications/{applicationId}/analyze` | Uses `application.jobDescription`; **400** if blank. Stores/replaces `job_requirements`. Returns match payload (includes `requiredSkills`). |
+| `GET` | `/api/applications/{applicationId}/match` | Recomputes match from stored requirements; if none, re-analyzes (and persists) when JD is present. |
+| `POST` | `/api/job-analysis/preview` | Body `{ "jobDescription": "..." }`. Analyze + match **without** persisting. |
+
+### curl examples
+
+```bash
+# Reuse TOKEN from Phase 2
+TOKEN=$(curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+# Seed skills (Phase 5)
+curl -sS -X POST http://localhost:8080/api/skills \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Java"}'
+curl -sS -X POST http://localhost:8080/api/skills \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Kafka"}'
+
+# Create application with a job description
+APP=$(curl -sS -X POST http://localhost:8080/api/applications \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+    "company":"Example Corp",
+    "jobTitle":"Backend Engineer",
+    "jobDescription":"Java, Spring Boot, Kafka, Postgres, Redis, Docker, K8s, AWS. System Design a plus."
+  }')
+APP_ID=$(python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" <<<"$APP")
+
+# Analyze (persist requirements + match)
+curl -sS -X POST http://localhost:8080/api/applications/$APP_ID/analyze \
+  -H "Authorization: Bearer $TOKEN"
+
+# Match from stored requirements (recomputes against current skills)
+curl -sS http://localhost:8080/api/applications/$APP_ID/match \
+  -H "Authorization: Bearer $TOKEN"
+
+# Preview without persisting
+curl -sS -X POST http://localhost:8080/api/job-analysis/preview \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jobDescription":"Looking for Python, Redis, and Kubernetes experience."}'
+```
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -392,7 +477,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 6–13 are planned and **not** present here. Expected later work includes reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+Phases 7–13 are planned and **not** present here. Expected later work includes reminders, notifications, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 
