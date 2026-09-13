@@ -14,7 +14,8 @@ public class InMemoryCacheConfiguration {
     CacheManager cacheManager() {
         ConcurrentMapCacheManager manager = new ConcurrentMapCacheManager(
                 CacheNames.RECOMMENDATIONS,
-                CacheNames.APPLICATION_MATCH
+                CacheNames.APPLICATION_MATCH,
+                CacheNames.ANALYTICS
         );
         manager.setAllowNullValues(false);
         return manager;

@@ -89,6 +89,7 @@ public class ApplicationService {
         recordHistory(application.getId(), null, status);
         publishStatusChanged(application, null, status);
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
         return ApplicationResponse.from(application);
     }
 
@@ -183,6 +184,7 @@ public class ApplicationService {
         }
 
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
         if (request.jobDescription() != null) {
             cacheEviction.evictApplicationMatch(userId, id);
         }
@@ -195,6 +197,7 @@ public class ApplicationService {
         historyRepository.deleteByApplicationId(application.getId());
         applicationRepository.delete(application);
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
         cacheEviction.evictApplicationMatch(userId, id);
     }
 

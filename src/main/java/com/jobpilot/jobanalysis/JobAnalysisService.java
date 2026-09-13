@@ -58,6 +58,7 @@ public class JobAnalysisService {
         JobMatchResponse result = jobMatchEngine.match(analysis.requiredSkills(), currentUserSkillNames(userId));
         cacheEviction.evictApplicationMatch(userId, applicationId);
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
         return result;
     }
 
@@ -92,6 +93,7 @@ public class JobAnalysisService {
         JobMatchResponse result = jobMatchEngine.match(required, currentUserSkillNames(userId));
         if (persisted) {
             cacheEviction.evictUserRecommendations(userId);
+            cacheEviction.evictUserAnalytics(userId);
         }
         return result;
     }

@@ -68,6 +68,7 @@ public class InterviewService {
             throw new JobPilotException(HttpStatus.CONFLICT, "Round number already exists for this application", ex);
         }
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
         return InterviewResponse.from(interview);
     }
 
@@ -136,6 +137,7 @@ public class InterviewService {
             );
         }
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
         return InterviewResponse.from(interview);
     }
 
@@ -143,6 +145,7 @@ public class InterviewService {
     public void delete(UUID userId, UUID id) {
         interviewRepository.delete(requireOwnedInterview(userId, id));
         cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserAnalytics(userId);
     }
 
     private Application requireOwnedApplication(UUID userId, UUID applicationId) {

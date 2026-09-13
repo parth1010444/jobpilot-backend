@@ -17,6 +17,11 @@ public class JobPilotCacheProperties {
      */
     private Duration applicationMatchTtl = Duration.ofSeconds(180);
 
+    /**
+     * TTL for {@link CacheNames#ANALYTICS} (summary / funnel).
+     */
+    private Duration analyticsTtl = Duration.ofSeconds(60);
+
     public Duration getRecommendationsTtl() {
         return recommendationsTtl;
     }
@@ -31,5 +36,13 @@ public class JobPilotCacheProperties {
 
     public void setApplicationMatchTtl(Duration applicationMatchTtl) {
         this.applicationMatchTtl = applicationMatchTtl;
+    }
+
+    public Duration getAnalyticsTtl() {
+        return analyticsTtl;
+    }
+
+    public void setAnalyticsTtl(Duration analyticsTtl) {
+        this.analyticsTtl = analyticsTtl;
     }
 }
