@@ -42,6 +42,10 @@ jobpilot:
   jwt:
     secret: ${JOBPILOT_JWT_SECRET:local-dev-only-change-me-use-a-long-random-secret-at-least-32-bytes}
     expiration-ms: ${JOBPILOT_JWT_EXPIRATION_MS:86400000}
+  reminders:
+    scheduler:
+      enabled: ${JOBPILOT_REMINDERS_SCHEDULER_ENABLED:true}
+      fixed-delay-ms: ${JOBPILOT_REMINDERS_SCHEDULER_FIXED_DELAY_MS:60000}
 
 logging:
   pattern:

@@ -14,3 +14,6 @@ jobpilot:
   jwt:
     secret: test-only-jwt-secret-key-at-least-32-bytes-long!!
     expiration-ms: 3600000
+  reminders:
+    scheduler:
+      enabled: false
