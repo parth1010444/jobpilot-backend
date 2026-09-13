@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -67,7 +67,7 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`, `V3__applications.sql`).
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`, `V3__applications.sql`, `V4__interviews.sql`).
 
 ## Prerequisites
 
@@ -120,6 +120,7 @@ Useful URLs:
 - `POST /api/auth/register` / `POST /api/auth/login` — auth (public)
 - `GET /api/users/me` — current user (requires `Authorization: Bearer <token>`)
 - `/api/applications` — application CRUD (requires Bearer JWT)
+- `/api/applications/{applicationId}/interviews` and `/api/interviews/{id}` — interview management (requires Bearer JWT)
 - Errors use a fixed JSON shape: `timestamp`, `status`, `error`, `message`, `path`
 
 ### 3. Optional: app container as well
@@ -238,6 +239,56 @@ curl -sS -X DELETE http://localhost:8080/api/applications/<id> \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Phase 4 — Interview management
+
+Authenticated interview-round CRUD is isolated through the owning application. The API never accepts a user id: both parent and interview lookups use the authenticated principal, and resources belonging to another user return **404**.
+
+Each interview has a positive `roundNumber` that is unique within its application, a `type` (`OA`, `TECHNICAL`, `SYSTEM_DESIGN`, `MANAGERIAL`, `HR`, `OTHER`), a `status` (`SCHEDULED`, `COMPLETED`, `CANCELLED`, `NO_SHOW`), scheduling details, optional notes/feedback, timestamps, and an optimistic-lock `version`. Status transitions are `SCHEDULED` → `COMPLETED`, `CANCELLED`, or `NO_SHOW`; terminal statuses cannot transition. Creating an interview intentionally **does not change the parent application status** in Phase 4.
+
+### Endpoints
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/api/applications/{applicationId}/interviews` | Create a round. Status defaults to `SCHEDULED`. Duplicate round → **409**. |
+| `GET` | `/api/applications/{applicationId}/interviews` | Paginated; defaults to `roundNumber,scheduledAt` ascending. |
+| `GET` | `/api/interviews/{id}` | Get an owned interview. |
+| `PATCH` | `/api/interviews/{id}` | Partial update; optional `version` detects stale writes. Invalid transition → **400**. |
+| `DELETE` | `/api/interviews/{id}` | Delete an owned interview. |
+
+### curl examples
+
+```bash
+# Create (reuse TOKEN and an application id from earlier examples)
+curl -sS -X POST http://localhost:8080/api/applications/<applicationId>/interviews \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "roundNumber":1,
+    "type":"TECHNICAL",
+    "scheduledAt":"2026-10-10T15:00:00Z",
+    "interviewer":"Ada Lovelace",
+    "meetingLink":"https://meet.example/round-1"
+  }'
+
+# List in round/schedule order
+curl -sS 'http://localhost:8080/api/applications/<applicationId>/interviews?page=0&size=20' \
+  -H "Authorization: Bearer $TOKEN"
+
+# Get one
+curl -sS http://localhost:8080/api/interviews/<id> \
+  -H "Authorization: Bearer $TOKEN"
+
+# Complete with optional feedback (version is from create/get)
+curl -sS -X PATCH http://localhost:8080/api/interviews/<id> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"version":0,"status":"COMPLETED","feedback":"Strong technical performance"}'
+
+# Delete
+curl -sS -X DELETE http://localhost:8080/api/interviews/<id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -249,7 +300,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 4–13 are planned and **not** present here. Expected later work includes interview tracking, resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+Phases 5–13 are planned and **not** present here. Expected later work includes resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 
