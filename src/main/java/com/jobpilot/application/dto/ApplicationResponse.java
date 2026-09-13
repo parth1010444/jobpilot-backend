@@ -22,6 +22,7 @@ public record ApplicationResponse(
         String jobDescription,
         String notes,
         Instant appliedAt,
+        UUID resumeId,
         Instant createdAt,
         Instant updatedAt,
         Long version
@@ -42,6 +43,7 @@ public record ApplicationResponse(
                 application.getJobDescription(),
                 application.getNotes(),
                 application.getAppliedAt(),
+                application.getResumeId(),
                 application.getCreatedAt(),
                 application.getUpdatedAt(),
                 application.getVersion()
