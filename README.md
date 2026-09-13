@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications.** Messaging (Kafka), email delivery retries, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -68,7 +68,7 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`, `V3__applications.sql`, `V4__interviews.sql`, `V5__resumes_and_skills.sql`).
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql` … `V7__reminders_and_notifications.sql`).
 
 ## Prerequisites
 
@@ -125,6 +125,8 @@ Useful URLs:
 - `/api/resumes` — resume library (requires Bearer JWT)
 - `/api/skills` — user skill profile (requires Bearer JWT)
 - `/api/recommendations` — next-action recommendations (requires Bearer JWT)
+- `/api/reminders` — reminder CRUD (requires Bearer JWT)
+- `/api/notifications` — in-app notifications (requires Bearer JWT)
 - Errors use a fixed JSON shape: `timestamp`, `status`, `error`, `message`, `path`
 
 ### 3. Optional: app container as well
@@ -523,6 +525,94 @@ curl -sS "http://localhost:8080/api/recommendations?limit=5" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Phase 8 — Reminders, scheduler, in-app notifications
+
+User-owned reminders with a Spring `@Scheduled` job that fires due items and creates **in-app** notifications. Email delivery is stubbed for Phase 9.
+
+### Reminder model
+
+| Field | Notes |
+| --- | --- |
+| `type` | `FOLLOW_UP`, `INTERVIEW_PREPARATION`, `INTERVIEW_FOLLOW_UP`, `OFFER_EXPIRY`, `CUSTOM` |
+| `status` | `PENDING`, `PROCESSED`, `CANCELLED` |
+| `applicationId` | Required for non-`CUSTOM` types; must belong to the current user. Nullable for `CUSTOM`. |
+| `scheduledAt` / `completedAt` | When due / when processed or cancelled |
+
+Auto-create of `INTERVIEW_PREPARATION` when an interview is scheduled is **manual-only in Phase 8** (avoid coupling / Phase 4 test churn). Create reminders via `POST /api/reminders`.
+
+### Notification model
+
+| Field | Notes |
+| --- | --- |
+| `type` | `REMINDER`, `SYSTEM` |
+| `status` | `PENDING` → `SENT` (in-app) → `READ`; `FAILED` reserved for later channels |
+| `reminderId` | Set when created from a reminder; **UNIQUE** so a reminder cannot produce two rows |
+| `retryCount` / `sentAt` | Ready for Phase 9 email retries |
+
+`InAppNotificationProvider` marks notifications `SENT` immediately. `EmailNotificationProvider` is a no-op stub.
+
+### Scheduler + idempotency
+
+- `@EnableScheduling` on the reminder module; job every **60s** (configurable via `jobpilot.reminders.scheduler.fixed-delay-ms`).
+- Disable with `jobpilot.reminders.scheduler.enabled=false` (tests do this and call `ReminderProcessor` directly).
+- Each tick: find `PENDING` rows with `scheduledAt <= now`, then **claim** with:
+
+```sql
+UPDATE reminders
+SET status = 'PROCESSED', completed_at = :now
+WHERE id = :id AND status = 'PENDING'
+```
+
+Only when the update count is **1** does the processor create a notification. A second tick (or concurrent worker) sees `0` and skips — **no duplicate notifications**. Unique `notifications.reminder_id` is a second guard.
+
+### APIs (authenticated, user-isolated)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/api/reminders` | Create (`PENDING`). |
+| `GET` | `/api/reminders` | Pageable list; optional `status`. |
+| `GET` | `/api/reminders/{id}` | Owner only; other user → **404**. |
+| `PATCH` | `/api/reminders/{id}` | Reschedule / edit title/description while `PENDING`; or `{"status":"CANCELLED"}`. |
+| `DELETE` | `/api/reminders/{id}` | Hard delete. |
+| `GET` | `/api/notifications` | Pageable list for current user. |
+| `PATCH` | `/api/notifications/{id}/read` | Mark `READ`. |
+
+### curl examples
+
+```bash
+TOKEN=$(curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+# Create a follow-up reminder (applicationId from Phase 3)
+curl -sS -X POST http://localhost:8080/api/reminders \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+    "applicationId":"<applicationId>",
+    "type":"FOLLOW_UP",
+    "title":"Follow up with recruiter",
+    "description":"Send a polite check-in email",
+    "scheduledAt":"2026-09-14T15:00:00Z"
+  }'
+
+# List pending
+curl -sS "http://localhost:8080/api/reminders?status=PENDING" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Cancel
+curl -sS -X PATCH http://localhost:8080/api/reminders/<reminderId> \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"status":"CANCELLED"}'
+
+# After the scheduler processes a due reminder:
+curl -sS http://localhost:8080/api/notifications \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -sS -X PATCH http://localhost:8080/api/notifications/<notificationId>/read \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -534,7 +624,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 8–13 are planned and **not** present here. Expected later work includes reminders, notifications, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+Phases 9–13 are planned and **not** present here. Expected later work includes email delivery with retries/Kafka, analytics, and a frontend.
 
 ## License
 
