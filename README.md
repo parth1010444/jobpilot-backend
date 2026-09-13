@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -124,6 +124,7 @@ Useful URLs:
 - `/api/applications/{applicationId}/interviews` and `/api/interviews/{id}` — interview management (requires Bearer JWT)
 - `/api/resumes` — resume library (requires Bearer JWT)
 - `/api/skills` — user skill profile (requires Bearer JWT)
+- `/api/recommendations` — next-action recommendations (requires Bearer JWT)
 - Errors use a fixed JSON shape: `timestamp`, `status`, `error`, `message`, `path`
 
 ### 3. Optional: app container as well
@@ -466,6 +467,62 @@ curl -sS -X POST http://localhost:8080/api/job-analysis/preview \
   -d '{"jobDescription":"Looking for Python, Redis, and Kubernetes experience."}'
 ```
 
+
+## Phase 7 — Recommendation engine
+
+Deterministic, **rule-based** next-action suggestions (no ML/LLM). Recommendations are **computed on read** from application status, timestamps, interviews, and optional Phase 6 match scores — no new Flyway table.
+
+### Rules
+
+| Condition | Action | Priority |
+| --- | --- | --- |
+| Status `APPLIED` or `OA`, no update for ≥7 days | `FOLLOW_UP` | HIGH |
+| Status `INTERVIEW`, `SCHEDULED` interview within next 2 days | `PREPARE_FOR_INTERVIEW` | HIGH |
+| Status `INTERVIEW`, recent `COMPLETED` interview, ≥3 days since completion, no upcoming scheduled interview | `INTERVIEW_FOLLOW_UP` | MEDIUM |
+| Status `REJECTED` | `REVIEW_FEEDBACK` | MEDIUM if rejected ≤14 days ago, else LOW |
+| Status `SAVED`, idle ≥14 days | `APPLY_OR_ARCHIVE` | MEDIUM |
+| Status `OFFER` | `EVALUATE_OFFER` | HIGH |
+| Stored job analysis exists and match score &lt; 50 (skipped for OFFER/REJECTED/WITHDRAWN) | `IMPROVE_SKILLS` | LOW |
+
+When multiple rules fire for one application, the engine picks the **best** by priority (HIGH → LOW) then urgency (e.g. longer stale / sooner interview). The list endpoint returns at most one recommendation per active application (excludes `WITHDRAWN`), sorted the same way.
+
+### Response shape
+
+```json
+{
+  "action": "FOLLOW_UP",
+  "priority": "HIGH",
+  "title": "Follow up with recruiter",
+  "reason": "No application update for 8 days",
+  "applicationId": "..."
+}
+```
+
+### APIs (authenticated, user-isolated)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/api/applications/{id}/recommendation` | Best next action for one owned application. Other user / missing → **404**. No rule matches → **404** (`No recommendation available for this application`). |
+| `GET` | `/api/recommendations` | Recommendations across the current user's active applications. Optional `limit` (default **10**, max 100). Sorted by priority then urgency. |
+
+### curl examples
+
+```bash
+# Reuse TOKEN from Phase 2
+TOKEN=$(curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+# Best next action for one application
+curl -sS http://localhost:8080/api/applications/<applicationId>/recommendation \
+  -H "Authorization: Bearer $TOKEN"
+
+# Top recommendations across active applications
+curl -sS "http://localhost:8080/api/recommendations?limit=5" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -477,7 +534,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 7–13 are planned and **not** present here. Expected later work includes reminders, notifications, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+Phases 8–13 are planned and **not** present here. Expected later work includes reminders, notifications, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 
