@@ -37,6 +37,12 @@ management:
     env:
       enabled: false
 
+# JWT — local/test defaults only. Production MUST override JOBPILOT_JWT_SECRET.
+jobpilot:
+  jwt:
+    secret: ${JOBPILOT_JWT_SECRET:local-dev-only-change-me-use-a-long-random-secret-at-least-32-bytes}
+    expiration-ms: ${JOBPILOT_JWT_EXPIRATION_MS:86400000}
+
 logging:
   pattern:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] [%X{correlationId:-}] %logger{36} - %msg%n"
