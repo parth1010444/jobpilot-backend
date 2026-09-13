@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting + Phase 11 analytics.** Email delivery remains stubbed (retries deferred); a frontend is still out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting + Phase 11 analytics + Phase 12 CORS for the Vite frontend.** Email delivery remains stubbed (retries deferred); the frontend UI itself is still out of scope.
 
 ## Architecture
 
@@ -103,6 +103,7 @@ Copy [`.env.example`](.env.example) to `.env` and adjust. Nothing secret is comm
 | `JOBPILOT_RATE_LIMIT_DEFAULT` | Global API requests per identity per window | `100` |
 | `JOBPILOT_RATE_LIMIT_AUTH` | `/api/auth/**` requests per IP per window | `10` |
 | `JOBPILOT_RATE_LIMIT_WINDOW` | Fixed window | `1m` |
+| `JOBPILOT_CORS_ALLOWED_ORIGINS` | Browser origins allowed to call the API (comma-separated) | `http://localhost:5173,http://127.0.0.1:5173` |
 
 > **Production:** you **must** set `JOBPILOT_JWT_SECRET` to a long random value (e.g. `openssl rand -base64 48`). The YAML default is for local development and tests only.
 
@@ -778,6 +779,18 @@ Summary and funnel responses are cached under the `analytics` cache (60s TTL whe
 
 Same as Phase 10: `./gradlew test` uses in-memory H2 + in-memory cache/rate-limit stores. Analytics integration tests cover status mixes, interview counts, timeline totals, skills-gap, and cross-user isolation.
 
+## Phase 12 — Frontend CORS
+
+The React Vite app on `http://localhost:5173` (and `http://127.0.0.1:5173`) can call this API from the browser. `SecurityConfig` already enables CORS via `.cors(Customizer.withDefaults())`; a `CorsConfigurationSource` bean now supplies the actual policy:
+
+- Allowed origins: `jobpilot.cors.allowed-origins` / `JOBPILOT_CORS_ALLOWED_ORIGINS` (defaults: Vite 5173)
+- Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+- Headers: `*` (Authorization, Content-Type, etc.)
+- Exposed: `Retry-After` (rate-limit 429s)
+- Credentials: allowed (`allowCredentials=true`); max-age 3600s
+
+Override origins in production — do not use `*` while credentials are on.
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory cache/rate-limit stores, so they do not require Docker.
@@ -789,7 +802,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory
 
 ## Planned later phases (not implemented)
 
-- **Phase 12** — frontend (UI for applications, interviews, analytics)
+- **Phase 12** — frontend UI (applications, interviews, analytics). Backend CORS for the Vite dev server is in place.
 - **Phase 13** — hardening / CI (broader integration coverage, production ops polish)
 - Email delivery with retries remains deferred — notifications stay in-app; the email provider is still stubbed
 
