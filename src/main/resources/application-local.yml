@@ -1,0 +1,7 @@
+# Local development profile. Activate with SPRING_PROFILES_ACTIVE=local
+# or ./gradlew bootRun --args='--spring.profiles.active=local'
+
+logging:
+  level:
+    com.jobpilot: DEBUG
+    org.hibernate.SQL: DEBUG
