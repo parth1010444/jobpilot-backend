@@ -1,10 +1,8 @@
 # JobPilot
 
-Creating a dev branch to push initial changes here.
-
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**This commit set is Phase 1 — Backend Foundation only.** Auth, application CRUD, messaging, caches, reminders, analytics, and a UI are explicitly out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication.** Application CRUD, messaging, caches, reminders, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -15,10 +13,11 @@ flowchart TB
   client[HTTP clients / later frontend]
   subgraph api [HTTP edge]
     controllers[Thin controllers]
+    security[Spring Security + JWT]
     advice[GlobalExceptionHandler]
     actuator[Actuator /health]
   end
-  subgraph modules [Domain modules - placeholders in Phase 1]
+  subgraph modules [Domain modules]
     auth[auth]
     user[user]
     application[application]
@@ -42,6 +41,8 @@ flowchart TB
 
   client --> controllers
   client --> actuator
+  client --> security
+  security --> controllers
   controllers --> modules
   controllers --> advice
   modules --> common
@@ -51,9 +52,9 @@ flowchart TB
   flyway --> pg
 ```
 
-Package root: `com.jobpilot`. Controllers stay thin; there is no domain logic yet.
+Package root: `com.jobpilot`. Controllers stay thin; business logic lives in services. JPA entities are not exposed in API responses — use DTOs.
 
-## Tech stack (Phase 1)
+## Tech stack
 
 | Piece | Choice |
 | --- | --- |
@@ -61,11 +62,12 @@ Package root: `com.jobpilot`. Controllers stay thin; there is no domain logic ye
 | Framework | Spring Boot 3.5 |
 | Build | Gradle (Kotlin DSL) |
 | Persistence | Spring Data JPA + Flyway |
-| Database | PostgreSQL 16 |
+| Database | PostgreSQL 16 (H2 for tests) |
+| Security | Spring Security + JWT (jjwt) + BCrypt |
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway.
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`).
 
 ## Prerequisites
 
@@ -84,6 +86,10 @@ Copy [`.env.example`](.env.example) to `.env` and adjust. Nothing secret is comm
 | `SPRING_DATASOURCE_USERNAME` | DB user | `jobpilot` |
 | `SPRING_DATASOURCE_PASSWORD` | DB password | `changeme` |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_PORT` | Compose Postgres service | `jobpilot` / `jobpilot` / `changeme` / `5432` |
+| `JOBPILOT_JWT_SECRET` | HMAC secret for access tokens | **local/test default only — override in production** |
+| `JOBPILOT_JWT_EXPIRATION_MS` | Access token lifetime (ms) | `86400000` (24h) |
+
+> **Production:** you **must** set `JOBPILOT_JWT_SECRET` to a long random value (e.g. `openssl rand -base64 48`). The YAML default is for local development and tests only.
 
 ## Local run
 
@@ -109,8 +115,10 @@ Or with the local profile (more verbose SQL logging):
 
 Useful URLs:
 
-- `GET /api/v1/ping` — trivial ping
-- `GET /actuator/health` — Actuator health
+- `GET /api/v1/ping` — trivial ping (public)
+- `GET /actuator/health` — Actuator health (public)
+- `POST /api/auth/register` / `POST /api/auth/login` — auth (public)
+- `GET /api/users/me` — current user (requires `Authorization: Bearer <token>`)
 - Errors use a fixed JSON shape: `timestamp`, `status`, `error`, `message`, `path`
 
 ### 3. Optional: app container as well
@@ -119,7 +127,38 @@ Useful URLs:
 docker compose --profile app up --build
 ```
 
-The app container talks to the `postgres` service on the compose network.
+The app container talks to the `postgres` service on the compose network. Pass `JOBPILOT_JWT_SECRET` via the environment when using this path.
+
+## Phase 2 — JWT authentication
+
+### Endpoints
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/register` | Public | Body: `email`, `password` (min 8), optional `name`. Returns JWT + user. Duplicate email → **409**. |
+| `POST` | `/api/auth/login` | Public | Body: `email`, `password`. Returns JWT + user. Bad credentials → **401**. |
+| `GET` | `/api/users/me` | Bearer JWT | Current user from `SecurityContext` (never trust a client-supplied user id). Missing/invalid token → **401**. |
+
+Passwords are stored as BCrypt hashes. Access tokens are HS256 JWTs (jjwt). Refresh tokens are out of scope for v1.
+
+### curl examples
+
+```bash
+# Register
+curl -sS -X POST http://localhost:8080/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123","name":"You"}'
+
+# Login
+TOKEN=$(curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+# Current user
+curl -sS http://localhost:8080/api/users/me \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 ## Tests and build
 
@@ -132,7 +171,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 2–13 are planned and **not** present here. Expected later work includes authentication, application and interview tracking, resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat placeholder packages as working features.
+Phases 3–13 are planned and **not** present here. Expected later work includes application and interview tracking, resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat placeholder packages as working features.
 
 ## License
 

@@ -34,6 +34,8 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-jobpilot}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       SERVER_PORT: 8080
+      JOBPILOT_JWT_SECRET: ${JOBPILOT_JWT_SECRET:-local-dev-only-change-me-use-a-long-random-secret-at-least-32-bytes}
+      JOBPILOT_JWT_EXPIRATION_MS: ${JOBPILOT_JWT_EXPIRATION_MS:-86400000}
     ports:
       - "${SERVER_PORT:-8080}:8080"
     restart: unless-stopped
