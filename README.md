@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -23,6 +23,7 @@ flowchart TB
     application[application]
     interview[interview]
     resume[resume]
+    skill[skill]
     reminder[reminder]
     notification[notification]
     jobanalysis[jobanalysis]
@@ -67,7 +68,7 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`, `V3__applications.sql`, `V4__interviews.sql`).
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`, `V3__applications.sql`, `V4__interviews.sql`, `V5__resumes_and_skills.sql`).
 
 ## Prerequisites
 
@@ -121,6 +122,8 @@ Useful URLs:
 - `GET /api/users/me` — current user (requires `Authorization: Bearer <token>`)
 - `/api/applications` — application CRUD (requires Bearer JWT)
 - `/api/applications/{applicationId}/interviews` and `/api/interviews/{id}` — interview management (requires Bearer JWT)
+- `/api/resumes` — resume library (requires Bearer JWT)
+- `/api/skills` — user skill profile (requires Bearer JWT)
 - Errors use a fixed JSON shape: `timestamp`, `status`, `error`, `message`, `path`
 
 ### 3. Optional: app container as well
@@ -289,6 +292,95 @@ curl -sS -X DELETE http://localhost:8080/api/interviews/<id> \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Phase 5 — Resumes and skills
+
+Authenticated resume library and skill profile, isolated to the current user. The API never accepts a user id: lookups use the authenticated principal, and resources belonging to another user return **404**.
+
+### Resumes
+
+| Field | Notes |
+| --- | --- |
+| `id`, `userId` | UUID; `userId` always from `SecurityContext` |
+| `name` | Required |
+| `versionLabel` | Optional string label (e.g. `V2`) — this is the resume version, not an optimistic-lock field |
+| `description`, `fileUrl` | Optional (`fileUrl` max 2048) |
+| `createdAt`, `updatedAt` | Timestamps |
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/api/resumes` | Create. |
+| `GET` | `/api/resumes` | List current user's resumes (newest `updatedAt` first). |
+| `GET` | `/api/resumes/{id}` | Owner only. |
+| `PATCH` | `/api/resumes/{id}` | Partial update; null fields are left unchanged. |
+| `DELETE` | `/api/resumes/{id}` | Owner only. **ON DELETE SET NULL**: applications that referenced this resume keep their row and `resumeId` becomes `null`. |
+
+### Skills
+
+Skill names are **normalized** (trim + lowercase) and unique per user via `UNIQUE (user_id, name)`.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/api/skills` | List current user's skills (name ascending). |
+| `POST` | `/api/skills` | Create. Duplicate (case-insensitive) → **409**. |
+| `DELETE` | `/api/skills/{id}` | Owner only; missing/other user → **404**. |
+
+### Application ↔ resume
+
+`CreateApplicationRequest` / `UpdateApplicationRequest` / `ApplicationResponse` include optional `resumeId`.
+
+- On create/update, a non-null `resumeId` must belong to the same user; otherwise **404** (`Resume not found`).
+- On `PATCH`, omit `resumeId` to leave it unchanged; send `"resumeId": null` to unlink without deleting the resume.
+- Deleting a resume does **not** delete applications; the FK is `ON DELETE SET NULL`.
+
+### curl examples
+
+```bash
+# Reuse TOKEN from Phase 2
+TOKEN=$(curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+# Create a resume
+curl -sS -X POST http://localhost:8080/api/resumes \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name":"Backend SWE",
+    "versionLabel":"V2",
+    "description":"Tailored for backend roles",
+    "fileUrl":"https://files.example/resume-v2.pdf"
+  }'
+
+# List / get / patch / delete
+curl -sS http://localhost:8080/api/resumes -H "Authorization: Bearer $TOKEN"
+curl -sS http://localhost:8080/api/resumes/<id> -H "Authorization: Bearer $TOKEN"
+curl -sS -X PATCH http://localhost:8080/api/resumes/<id> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"versionLabel":"V3","description":"Added recent role"}'
+curl -sS -X DELETE http://localhost:8080/api/resumes/<id> -H "Authorization: Bearer $TOKEN"
+
+# Skills
+curl -sS -X POST http://localhost:8080/api/skills \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Java"}'
+curl -sS http://localhost:8080/api/skills -H "Authorization: Bearer $TOKEN"
+curl -sS -X DELETE http://localhost:8080/api/skills/<id> -H "Authorization: Bearer $TOKEN"
+
+# Attach a resume when creating / updating an application
+curl -sS -X POST http://localhost:8080/api/applications \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"company":"Google","jobTitle":"Software Engineer","resumeId":"<resumeId>"}'
+
+curl -sS -X PATCH http://localhost:8080/api/applications/<applicationId> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"version":0,"resumeId":"<resumeId>"}'
+```
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -300,7 +392,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 5–13 are planned and **not** present here. Expected later work includes resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+Phases 6–13 are planned and **not** present here. Expected later work includes reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 

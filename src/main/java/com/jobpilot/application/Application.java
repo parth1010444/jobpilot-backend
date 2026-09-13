@@ -61,6 +61,9 @@ public class Application {
     @Column(name = "applied_at")
     private Instant appliedAt;
 
+    @Column(name = "resume_id")
+    private UUID resumeId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -87,7 +90,8 @@ public class Application {
             Integer salaryMax,
             String jobDescription,
             String notes,
-            Instant appliedAt
+            Instant appliedAt,
+            UUID resumeId
     ) {
         this.id = UUID.randomUUID();
         this.userId = userId;
@@ -103,6 +107,7 @@ public class Application {
         this.jobDescription = jobDescription;
         this.notes = notes;
         this.appliedAt = appliedAt;
+        this.resumeId = resumeId;
     }
 
     @PrePersist
@@ -224,6 +229,14 @@ public class Application {
 
     public void setAppliedAt(Instant appliedAt) {
         this.appliedAt = appliedAt;
+    }
+
+    public UUID getResumeId() {
+        return resumeId;
+    }
+
+    public void setResumeId(UUID resumeId) {
+        this.resumeId = resumeId;
     }
 
     public Instant getCreatedAt() {

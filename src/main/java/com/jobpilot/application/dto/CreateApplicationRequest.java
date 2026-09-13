@@ -6,6 +6,7 @@ import com.jobpilot.application.EmploymentType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.UUID;
 
 public record CreateApplicationRequest(
         @NotBlank @Size(max = 255) String company,
@@ -19,6 +20,7 @@ public record CreateApplicationRequest(
         Integer salaryMax,
         String jobDescription,
         String notes,
-        Instant appliedAt
+        Instant appliedAt,
+        UUID resumeId
 ) {
 }

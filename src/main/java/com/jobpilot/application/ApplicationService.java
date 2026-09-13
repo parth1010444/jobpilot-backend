@@ -5,6 +5,7 @@ import com.jobpilot.application.dto.CreateApplicationRequest;
 import com.jobpilot.application.dto.UpdateApplicationRequest;
 import com.jobpilot.application.validator.ApplicationStatusTransitionValidator;
 import com.jobpilot.common.error.JobPilotException;
+import com.jobpilot.resume.ResumeRepository;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -32,15 +33,18 @@ public class ApplicationService {
     private final ApplicationRepository applicationRepository;
     private final ApplicationStatusHistoryRepository historyRepository;
     private final ApplicationStatusTransitionValidator transitionValidator;
+    private final ResumeRepository resumeRepository;
 
     public ApplicationService(
             ApplicationRepository applicationRepository,
             ApplicationStatusHistoryRepository historyRepository,
-            ApplicationStatusTransitionValidator transitionValidator
+            ApplicationStatusTransitionValidator transitionValidator,
+            ResumeRepository resumeRepository
     ) {
         this.applicationRepository = applicationRepository;
         this.historyRepository = historyRepository;
         this.transitionValidator = transitionValidator;
+        this.resumeRepository = resumeRepository;
     }
 
     @Transactional
@@ -64,7 +68,8 @@ public class ApplicationService {
                 request.salaryMax(),
                 blankToNull(request.jobDescription()),
                 blankToNull(request.notes()),
-                appliedAt
+                appliedAt,
+                resolveResumeId(userId, request.resumeId())
         );
 
         applicationRepository.save(application);
@@ -134,6 +139,9 @@ public class ApplicationService {
         if (request.appliedAt() != null) {
             application.setAppliedAt(request.appliedAt());
         }
+        if (request.resumeId() != null) {
+            application.setResumeId(resolveResumeId(userId, request.resumeId().orElse(null)));
+        }
 
         if (request.status() != null) {
             ApplicationStatus oldStatus = application.getStatus();
@@ -171,6 +179,20 @@ public class ApplicationService {
     private Application requireOwned(UUID userId, UUID id) {
         return applicationRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new JobPilotException(HttpStatus.NOT_FOUND, "Application not found"));
+    }
+
+    /**
+     * Resume must belong to the same user. Missing or foreign resume → 404
+     * so we do not leak another user's resume ids.
+     */
+    private UUID resolveResumeId(UUID userId, UUID resumeId) {
+        if (resumeId == null) {
+            return null;
+        }
+        if (!resumeRepository.existsByIdAndUserId(resumeId, userId)) {
+            throw new JobPilotException(HttpStatus.NOT_FOUND, "Resume not found");
+        }
+        return resumeId;
     }
 
     private void recordHistory(UUID applicationId, ApplicationStatus oldStatus, ApplicationStatus newStatus) {

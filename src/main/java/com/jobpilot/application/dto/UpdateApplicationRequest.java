@@ -6,10 +6,15 @@ import com.jobpilot.application.EmploymentType;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Partial update. Null fields (other than {@code version}) are left unchanged.
  * {@code version} is required for optimistic locking.
+ * {@code resumeId} is {@link java.util.Optional}: omit to leave unchanged,
+ * {@code Optional.empty()} / JSON {@code null} to unlink, or a value to attach
+ * a resume owned by the same user.
  */
 public record UpdateApplicationRequest(
         @NotNull Long version,
@@ -24,6 +29,7 @@ public record UpdateApplicationRequest(
         Integer salaryMax,
         String jobDescription,
         String notes,
-        Instant appliedAt
+        Instant appliedAt,
+        Optional<UUID> resumeId
 ) {
 }
