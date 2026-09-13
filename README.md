@@ -1,5 +1,7 @@
 # JobPilot
 
+Creating a dev branch to push initial changes here.
+
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
 **This commit set is Phase 1 — Backend Foundation only.** Auth, application CRUD, messaging, caches, reminders, analytics, and a UI are explicitly out of scope.
