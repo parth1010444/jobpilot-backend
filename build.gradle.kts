@@ -28,8 +28,7 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testRuntimeOnly("org.h2database:h2")
-    testRuntimeOnly("org.flywaydb:flyway-database-h2")
+    testRuntimeOnly("com.h2database:h2")
 }
 
 tasks.withType<Test> {
