@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication.** Application CRUD, messaging, caches, reminders, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking.** Messaging, caches, reminders, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -67,7 +67,7 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`).
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql`, `V2__auth_users.sql`, `V3__applications.sql`).
 
 ## Prerequisites
 
@@ -119,6 +119,7 @@ Useful URLs:
 - `GET /actuator/health` — Actuator health (public)
 - `POST /api/auth/register` / `POST /api/auth/login` — auth (public)
 - `GET /api/users/me` — current user (requires `Authorization: Bearer <token>`)
+- `/api/applications` — application CRUD (requires Bearer JWT)
 - Errors use a fixed JSON shape: `timestamp`, `status`, `error`, `message`, `path`
 
 ### 3. Optional: app container as well
@@ -160,6 +161,83 @@ curl -sS http://localhost:8080/api/users/me \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+
+## Phase 3 — Application tracking
+
+Authenticated CRUD for job applications with DB-level filtering, status state machine, status history, and optimistic locking.
+
+### Domain
+
+| Field | Notes |
+| --- | --- |
+| `id`, `userId` | UUID; `userId` always from `SecurityContext` (never from the client body) |
+| `company`, `jobTitle` | Required |
+| `jobUrl`, `location`, `employmentType`, `source` | Optional |
+| `status` | `SAVED`, `APPLIED`, `OA`, `INTERVIEW`, `OFFER`, `REJECTED`, `WITHDRAWN` |
+| `source` | `LINKEDIN`, `COMPANY_WEBSITE`, `REFERRAL`, `RECRUITER`, `JOB_PORTAL`, `OTHER` |
+| `employmentType` | `FULL_TIME`, `PART_TIME`, `CONTRACT`, `INTERNSHIP`, `TEMPORARY`, `OTHER` |
+| `salaryMin`, `salaryMax` | Optional integers |
+| `jobDescription`, `notes` | Optional text |
+| `appliedAt`, `createdAt`, `updatedAt` | Timestamps |
+| `version` | `@Version` optimistic lock — required on `PATCH` |
+
+Status transitions are validated by `ApplicationStatusTransitionValidator`. Every status change (including create) writes a row to `application_status_history`.
+
+### Endpoints
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/api/applications` | Bearer JWT | Create. Default status `SAVED`. |
+| `GET` | `/api/applications` | Bearer JWT | Paginated list. Filters: `status`, `q` (company/title/location/notes). Sort e.g. `sort=appliedAt,desc`. |
+| `GET` | `/api/applications/{id}` | Bearer JWT | Owner only; missing/other user → **404**. |
+| `PATCH` | `/api/applications/{id}` | Bearer JWT | Partial update; body must include `version`. Stale version → **409**. Invalid transition → **400**. |
+| `DELETE` | `/api/applications/{id}` | Bearer JWT | Owner only. |
+
+### curl examples
+
+```bash
+# Register / login (reuse TOKEN from Phase 2)
+TOKEN=$(curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"password123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+# Create application
+curl -sS -X POST http://localhost:8080/api/applications \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "company":"Google",
+    "jobTitle":"Software Engineer",
+    "jobUrl":"https://careers.google.com/jobs/1",
+    "location":"Mountain View",
+    "employmentType":"FULL_TIME",
+    "source":"LINKEDIN",
+    "status":"SAVED",
+    "salaryMin":150000,
+    "salaryMax":200000,
+    "notes":"Dream role"
+  }'
+
+# List / filter / search
+curl -sS "http://localhost:8080/api/applications?status=INTERVIEW&page=0&size=20&q=google&sort=appliedAt,desc" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Get one
+curl -sS http://localhost:8080/api/applications/<id> \
+  -H "Authorization: Bearer $TOKEN"
+
+# Patch (include version from GET/create response)
+curl -sS -X PATCH http://localhost:8080/api/applications/<id> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"version":0,"status":"APPLIED","notes":"Submitted"}'
+
+# Delete
+curl -sS -X DELETE http://localhost:8080/api/applications/<id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -171,7 +249,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 3–13 are planned and **not** present here. Expected later work includes application and interview tracking, resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat placeholder packages as working features.
+Phases 4–13 are planned and **not** present here. Expected later work includes interview tracking, resumes, reminders, notifications, job analysis, recommendations, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 
