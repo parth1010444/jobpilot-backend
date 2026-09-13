@@ -3,11 +3,14 @@ package com.jobpilot.jobanalysis;
 import com.jobpilot.application.Application;
 import com.jobpilot.application.ApplicationRepository;
 import com.jobpilot.common.error.JobPilotException;
+import com.jobpilot.infrastructure.cache.CacheEviction;
+import com.jobpilot.infrastructure.cache.CacheNames;
 import com.jobpilot.jobanalysis.dto.JobMatchResponse;
 import com.jobpilot.skill.Skill;
 import com.jobpilot.skill.SkillRepository;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,19 +23,22 @@ public class JobAnalysisService {
     private final JobRequirementRepository jobRequirementRepository;
     private final JobDescriptionAnalyzer jobDescriptionAnalyzer;
     private final JobMatchEngine jobMatchEngine;
+    private final CacheEviction cacheEviction;
 
     public JobAnalysisService(
             ApplicationRepository applicationRepository,
             SkillRepository skillRepository,
             JobRequirementRepository jobRequirementRepository,
             JobDescriptionAnalyzer jobDescriptionAnalyzer,
-            JobMatchEngine jobMatchEngine
+            JobMatchEngine jobMatchEngine,
+            CacheEviction cacheEviction
     ) {
         this.applicationRepository = applicationRepository;
         this.skillRepository = skillRepository;
         this.jobRequirementRepository = jobRequirementRepository;
         this.jobDescriptionAnalyzer = jobDescriptionAnalyzer;
         this.jobMatchEngine = jobMatchEngine;
+        this.cacheEviction = cacheEviction;
     }
 
     /**
@@ -49,17 +55,25 @@ public class JobAnalysisService {
 
         JobAnalysisResult analysis = jobDescriptionAnalyzer.analyze(jd);
         replaceRequirements(applicationId, analysis.requiredSkills());
-        return jobMatchEngine.match(analysis.requiredSkills(), currentUserSkillNames(userId));
+        JobMatchResponse result = jobMatchEngine.match(analysis.requiredSkills(), currentUserSkillNames(userId));
+        cacheEviction.evictApplicationMatch(userId, applicationId);
+        cacheEviction.evictUserRecommendations(userId);
+        return result;
     }
 
     /**
      * Recompute match from stored requirements, or re-analyze (and persist) if none exist.
      */
+    @Cacheable(
+            cacheNames = CacheNames.APPLICATION_MATCH,
+            key = "T(com.jobpilot.infrastructure.cache.CacheNames).applicationMatchKey(#userId, #applicationId)"
+    )
     @Transactional
     public JobMatchResponse matchApplication(UUID userId, UUID applicationId) {
         Application application = requireOwnedApplication(userId, applicationId);
 
         List<String> required;
+        boolean persisted = false;
         if (jobRequirementRepository.existsByApplicationId(applicationId)) {
             required = jobRequirementRepository.findByApplicationIdOrderBySkillNameAsc(applicationId).stream()
                     .map(JobRequirement::getSkillName)
@@ -72,9 +86,14 @@ public class JobAnalysisService {
             JobAnalysisResult analysis = jobDescriptionAnalyzer.analyze(jd);
             replaceRequirements(applicationId, analysis.requiredSkills());
             required = analysis.requiredSkills();
+            persisted = true;
         }
 
-        return jobMatchEngine.match(required, currentUserSkillNames(userId));
+        JobMatchResponse result = jobMatchEngine.match(required, currentUserSkillNames(userId));
+        if (persisted) {
+            cacheEviction.evictUserRecommendations(userId);
+        }
+        return result;
     }
 
     /**

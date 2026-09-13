@@ -1,6 +1,7 @@
 package com.jobpilot.skill;
 
 import com.jobpilot.common.error.JobPilotException;
+import com.jobpilot.infrastructure.cache.CacheEviction;
 import com.jobpilot.skill.dto.CreateSkillRequest;
 import com.jobpilot.skill.dto.SkillResponse;
 import java.util.List;
@@ -15,9 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class SkillService {
 
     private final SkillRepository skillRepository;
+    private final CacheEviction cacheEviction;
 
-    public SkillService(SkillRepository skillRepository) {
+    public SkillService(SkillRepository skillRepository, CacheEviction cacheEviction) {
         this.skillRepository = skillRepository;
+        this.cacheEviction = cacheEviction;
     }
 
     @Transactional(readOnly = true)
@@ -40,12 +43,16 @@ public class SkillService {
         } catch (DataIntegrityViolationException ex) {
             throw duplicateSkill(ex);
         }
+        cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserApplicationMatches(userId);
         return SkillResponse.from(skill);
     }
 
     @Transactional
     public void delete(UUID userId, UUID id) {
         skillRepository.delete(requireOwned(userId, id));
+        cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictUserApplicationMatches(userId);
     }
 
     private Skill requireOwned(UUID userId, UUID id) {

@@ -4,6 +4,7 @@ import com.jobpilot.application.Application;
 import com.jobpilot.application.ApplicationRepository;
 import com.jobpilot.application.ApplicationStatus;
 import com.jobpilot.common.error.JobPilotException;
+import com.jobpilot.infrastructure.cache.CacheNames;
 import com.jobpilot.interview.Interview;
 import com.jobpilot.interview.InterviewRepository;
 import com.jobpilot.jobanalysis.JobMatchEngine;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -69,6 +71,10 @@ public class RecommendationService {
                 ));
     }
 
+    @Cacheable(
+            cacheNames = CacheNames.RECOMMENDATIONS,
+            key = "T(com.jobpilot.infrastructure.cache.CacheNames).recommendationsKey(#userId, #limit)"
+    )
     @Transactional(readOnly = true)
     public List<RecommendationResponse> listForUser(UUID userId, Integer limit) {
         int effectiveLimit = normalizeLimit(limit);

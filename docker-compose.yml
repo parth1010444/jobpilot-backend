@@ -43,10 +43,25 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: jobpilot-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   # Optional application container. Start with:
   #   docker compose --profile app up --build
   # Note: Kafka advertised listener is localhost (for host-run Spring Boot). Prefer
-  # running the app on the host against compose postgres+kafka, or override bootstrap.
+  # running the app on the host against compose postgres+kafka+redis, or override bootstrap.
   app:
     profiles: ["app"]
     build:
@@ -58,17 +73,23 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: local
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-jobpilot}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-jobpilot}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:-host.docker.internal:9092}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${SPRING_DATA_REDIS_PASSWORD:-}
       SERVER_PORT: 8080
       JOBPILOT_JWT_SECRET: ${JOBPILOT_JWT_SECRET:-local-dev-only-change-me-use-a-long-random-secret-at-least-32-bytes}
       JOBPILOT_JWT_EXPIRATION_MS: ${JOBPILOT_JWT_EXPIRATION_MS:-86400000}
       JOBPILOT_OUTBOX_RELAY_ENABLED: ${JOBPILOT_OUTBOX_RELAY_ENABLED:-true}
       JOBPILOT_KAFKA_CONSUMER_ENABLED: ${JOBPILOT_KAFKA_CONSUMER_ENABLED:-true}
+      JOBPILOT_REDIS_ENABLED: ${JOBPILOT_REDIS_ENABLED:-true}
     ports:
       - "${SERVER_PORT:-8080}:8080"
     extra_hosts:
@@ -78,3 +99,4 @@ services:
 volumes:
   postgres_data:
   kafka_data:
+  redis_data:

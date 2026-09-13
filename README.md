@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka.** Email delivery retries, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka + Phase 10 Redis caching / API rate limiting.** Email delivery retries, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -34,11 +34,13 @@ flowchart TB
   subgraph platform [Platform]
     common[common]
     config[config]
-    infra[infrastructure]
+    infra[infrastructure / cache / ratelimit]
     jpa[Spring Data JPA]
     flyway[Flyway]
+    rediscache[Spring Cache]
   end
   pg[(PostgreSQL)]
+  redis[(Redis)]
 
   client --> controllers
   client --> actuator
@@ -51,6 +53,8 @@ flowchart TB
   modules --> jpa
   jpa --> flyway
   flyway --> pg
+  infra --> redis
+  rediscache --> redis
 ```
 
 Package root: `com.jobpilot`. Controllers stay thin; business logic lives in services. JPA entities are not exposed in API responses — use DTOs.
@@ -66,15 +70,16 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Database | PostgreSQL 16 (H2 for tests) |
 | Security | Spring Security + JWT (jjwt) + BCrypt |
 | Messaging | Spring Kafka + transactional outbox |
+| Cache / rate limit | Spring Cache + Redis (in-memory fallback when Redis is disabled) |
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql` … `V7__reminders_and_notifications.sql`, `V8__outbox_events.sql`).
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql` … `V7__reminders_and_notifications.sql`, `V8__outbox_events.sql`). Phase 10 adds no Flyway migration — cache and rate-limit state live in Redis (or process memory).
 
 ## Prerequisites
 
 - JDK 21
-- Docker (for PostgreSQL, Kafka, and optionally the app image)
+- Docker (for PostgreSQL, Kafka, Redis, and optionally the app image)
 
 ## Environment variables
 
@@ -90,6 +95,14 @@ Copy [`.env.example`](.env.example) to `.env` and adjust. Nothing secret is comm
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_PORT` | Compose Postgres service | `jobpilot` / `jobpilot` / `changeme` / `5432` |
 | `JOBPILOT_JWT_SECRET` | HMAC secret for access tokens | **local/test default only — override in production** |
 | `JOBPILOT_JWT_EXPIRATION_MS` | Access token lifetime (ms) | `86400000` (24h) |
+| `SPRING_DATA_REDIS_HOST` / `SPRING_DATA_REDIS_PORT` / `SPRING_DATA_REDIS_PASSWORD` | Redis connection | `localhost` / `6379` / empty |
+| `JOBPILOT_REDIS_ENABLED` | Use Redis for cache + rate-limit counters | `true` (tests: `false`) |
+| `JOBPILOT_CACHE_RECOMMENDATIONS_TTL` | `recommendations` cache TTL | `120s` |
+| `JOBPILOT_CACHE_APPLICATION_MATCH_TTL` | `applicationMatch` cache TTL | `180s` |
+| `JOBPILOT_RATE_LIMIT_ENABLED` | Enable the API rate-limit filter | `true` |
+| `JOBPILOT_RATE_LIMIT_DEFAULT` | Global API requests per identity per window | `100` |
+| `JOBPILOT_RATE_LIMIT_AUTH` | `/api/auth/**` requests per IP per window | `10` |
+| `JOBPILOT_RATE_LIMIT_WINDOW` | Fixed window | `1m` |
 
 > **Production:** you **must** set `JOBPILOT_JWT_SECRET` to a long random value (e.g. `openssl rand -base64 48`). The YAML default is for local development and tests only.
 
@@ -98,8 +111,10 @@ Copy [`.env.example`](.env.example) to `.env` and adjust. Nothing secret is comm
 ### 1. PostgreSQL via Docker Compose
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres kafka redis
 ```
+
+Postgres is enough for a DB-only boot. Add Kafka (Phase 9 outbox relay/consumer) and Redis (Phase 10 cache + rate limits) for the full local stack.
 
 This publishes Postgres on `localhost:5432` with the defaults above.
 
@@ -631,8 +646,9 @@ Email delivery retries are intentionally **not** part of Phase 9 — this phase 
 ### Local Kafka
 
 ```bash
-docker compose up -d postgres kafka
-# Kafka (Bitnami legacy image, KRaft, no ZooKeeper) on localhost:9092
+docker compose up -d postgres kafka redis
+# Kafka (Bitnami, KRaft, no ZooKeeper) on localhost:9092
+# Redis 7 on localhost:6379 (Phase 10)
 ```
 
 Env vars (see `.env.example`): `SPRING_KAFKA_BOOTSTRAP_SERVERS`, `JOBPILOT_OUTBOX_*`, `JOBPILOT_KAFKA_CONSUMER_*`.
@@ -655,9 +671,65 @@ No public REST API for the outbox — it is an internal reliability mechanism.
 - Unit tests mock `KafkaTemplate`
 - Integration tests assert PENDING outbox rows after application create/status change
 
+## Phase 10 — Redis caching + API rate limiting
+
+Read-through caches for high-read, low-staleness endpoints, plus a servlet filter that rate-limits by user (authenticated) or IP (login/register). Redis is the production store; tests and local-without-Redis use in-memory stand-ins. **No new Flyway migration.**
+
+### Local Redis
+
+```bash
+docker compose up -d postgres kafka redis
+# Redis 7 (alpine) on localhost:6379
+```
+
+Set `JOBPILOT_REDIS_ENABLED=false` to skip Redis entirely: Spring Cache uses `ConcurrentMapCacheManager`, and rate limiting uses a process-local concurrent map. TTL is not applied in that mode (entries live until eviction or process exit).
+
+### Cache names and eviction
+
+| Cache | Key | Default TTL (Redis) | What |
+| --- | --- | --- | --- |
+| `recommendations` | `userId:limit` (limit normalized, default 10, max 100) | 120s | `GET /api/recommendations` |
+| `applicationMatch` | `userId:applicationId` | 180s | `GET /api/applications/{id}/match` |
+
+Domain services use only `@Cacheable` / `CacheEviction` — no Redis types leak into `application`, `recommendation`, `skill`, or `jobanalysis`.
+
+Eviction (same behavior with in-memory or Redis):
+
+- Application create / update / delete → user's `recommendations`
+- Application delete, or `jobDescription` change → that `applicationMatch`
+- Skill add / delete → user's `recommendations` and all of their `applicationMatch` entries
+- Analyze (and first-time persist on match GET) → that `applicationMatch` + user `recommendations`
+- Interview create / update / delete → user's `recommendations`
+
+When Redis prefix-scan is unavailable, eviction of "all keys for a user" falls back to clearing that cache name. TTLs are short, so that is acceptable.
+
+### Rate limiting
+
+`RateLimitFilter` runs **after** JWT so `SecurityContext` is populated.
+
+| Traffic | Identity | Default limit |
+| --- | --- | --- |
+| Authenticated API | user id | 100 req / min |
+| `/api/auth/**` (login / register) | client IP | 10 req / min |
+| Other anonymous | client IP | 100 req / min |
+
+IP resolution: first `X-Forwarded-For` hop, else `X-Real-IP`, else `remoteAddr`.
+
+**Excluded:** `GET /actuator/health` (+ `/actuator/health/**`) and `GET /api/v1/ping`.
+
+On exceed: **HTTP 429** with the standard error JSON (`timestamp`, `status`, `error`, `message`, `path`) and a `Retry-After` header (seconds remaining in the window). Counters are a **fixed window**. Redis uses atomic `INCR` + `PEXPIRE`; when Redis is disabled the same window math runs in a `ConcurrentHashMap`.
+
+### Tests without Redis (or Kafka)
+
+`./gradlew test` does **not** require a Redis or Kafka broker:
+
+- `jobpilot.redis.enabled=false` in `application-test.yml` — in-memory `CacheManager` + in-memory rate-limit store; Redis auto-configuration is excluded
+- Rate-limit defaults in tests are raised to 10000/min so existing flows do not trip 429
+- Dedicated tests set low limits via `@TestPropertySource` and assert 429 in in-memory mode
+
 ## Tests and build
 
-Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
+Tests use an in-memory H2 database (PostgreSQL compatibility mode) and in-memory cache/rate-limit stores, so they do not require Docker.
 
 ```bash
 ./gradlew test
@@ -666,7 +738,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 10–13 are planned and **not** present here. Expected later work includes email delivery with retries, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
+Phases 11–13 are planned and **not** present here. Expected later work includes email delivery with retries, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 

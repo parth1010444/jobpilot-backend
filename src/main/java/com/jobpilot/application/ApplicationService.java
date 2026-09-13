@@ -6,6 +6,7 @@ import com.jobpilot.application.dto.UpdateApplicationRequest;
 import com.jobpilot.application.validator.ApplicationStatusTransitionValidator;
 import com.jobpilot.common.error.JobPilotException;
 import com.jobpilot.event.OutboxPublisher;
+import com.jobpilot.infrastructure.cache.CacheEviction;
 import com.jobpilot.event.dto.ApplicationStatusChangedEvent;
 import com.jobpilot.resume.ResumeRepository;
 import java.time.Clock;
@@ -38,6 +39,7 @@ public class ApplicationService {
     private final ApplicationStatusTransitionValidator transitionValidator;
     private final ResumeRepository resumeRepository;
     private final OutboxPublisher outboxPublisher;
+    private final CacheEviction cacheEviction;
     private final Clock clock;
 
     public ApplicationService(
@@ -46,6 +48,7 @@ public class ApplicationService {
             ApplicationStatusTransitionValidator transitionValidator,
             ResumeRepository resumeRepository,
             OutboxPublisher outboxPublisher,
+            CacheEviction cacheEviction,
             Clock clock
     ) {
         this.applicationRepository = applicationRepository;
@@ -53,6 +56,7 @@ public class ApplicationService {
         this.transitionValidator = transitionValidator;
         this.resumeRepository = resumeRepository;
         this.outboxPublisher = outboxPublisher;
+        this.cacheEviction = cacheEviction;
         this.clock = clock;
     }
 
@@ -84,6 +88,7 @@ public class ApplicationService {
         applicationRepository.save(application);
         recordHistory(application.getId(), null, status);
         publishStatusChanged(application, null, status);
+        cacheEviction.evictUserRecommendations(userId);
         return ApplicationResponse.from(application);
     }
 
@@ -177,6 +182,10 @@ public class ApplicationService {
             );
         }
 
+        cacheEviction.evictUserRecommendations(userId);
+        if (request.jobDescription() != null) {
+            cacheEviction.evictApplicationMatch(userId, id);
+        }
         return ApplicationResponse.from(application);
     }
 
@@ -185,6 +194,8 @@ public class ApplicationService {
         Application application = requireOwned(userId, id);
         historyRepository.deleteByApplicationId(application.getId());
         applicationRepository.delete(application);
+        cacheEviction.evictUserRecommendations(userId);
+        cacheEviction.evictApplicationMatch(userId, id);
     }
 
     private void publishStatusChanged(
