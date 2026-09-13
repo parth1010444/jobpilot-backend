@@ -32,6 +32,18 @@ spring:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+  # Own Redis beans when jobpilot.redis.enabled=true. Always exclude Boot auto-config
+  # so tests / local-without-Redis never attempt a connection.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration
 
 server:
   port: ${SERVER_PORT:8080}
@@ -68,6 +80,16 @@ jobpilot:
     consumer:
       enabled: ${JOBPILOT_KAFKA_CONSUMER_ENABLED:true}
       group-id: ${JOBPILOT_KAFKA_CONSUMER_GROUP_ID:jobpilot-backend}
+  redis:
+    enabled: ${JOBPILOT_REDIS_ENABLED:true}
+  cache:
+    recommendations-ttl: ${JOBPILOT_CACHE_RECOMMENDATIONS_TTL:120s}
+    application-match-ttl: ${JOBPILOT_CACHE_APPLICATION_MATCH_TTL:180s}
+  rate-limit:
+    enabled: ${JOBPILOT_RATE_LIMIT_ENABLED:true}
+    default-limit: ${JOBPILOT_RATE_LIMIT_DEFAULT:100}
+    auth-limit: ${JOBPILOT_RATE_LIMIT_AUTH:10}
+    window: ${JOBPILOT_RATE_LIMIT_WINDOW:1m}
 
 logging:
   pattern:

@@ -27,3 +27,11 @@ jobpilot:
   kafka:
     consumer:
       enabled: false
+  redis:
+    enabled: false
+  rate-limit:
+    enabled: true
+    default-limit: 10000
+    auth-limit: 10000
+    window: 1m
+

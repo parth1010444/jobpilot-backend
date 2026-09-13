@@ -3,6 +3,7 @@ package com.jobpilot.interview;
 import com.jobpilot.application.Application;
 import com.jobpilot.application.ApplicationRepository;
 import com.jobpilot.common.error.JobPilotException;
+import com.jobpilot.infrastructure.cache.CacheEviction;
 import com.jobpilot.interview.dto.CreateInterviewRequest;
 import com.jobpilot.interview.dto.InterviewResponse;
 import com.jobpilot.interview.dto.UpdateInterviewRequest;
@@ -28,15 +29,18 @@ public class InterviewService {
     private final InterviewRepository interviewRepository;
     private final ApplicationRepository applicationRepository;
     private final InterviewStatusTransitionValidator transitionValidator;
+    private final CacheEviction cacheEviction;
 
     public InterviewService(
             InterviewRepository interviewRepository,
             ApplicationRepository applicationRepository,
-            InterviewStatusTransitionValidator transitionValidator
+            InterviewStatusTransitionValidator transitionValidator,
+            CacheEviction cacheEviction
     ) {
         this.interviewRepository = interviewRepository;
         this.applicationRepository = applicationRepository;
         this.transitionValidator = transitionValidator;
+        this.cacheEviction = cacheEviction;
     }
 
     @Transactional
@@ -63,6 +67,7 @@ public class InterviewService {
         } catch (DataIntegrityViolationException ex) {
             throw new JobPilotException(HttpStatus.CONFLICT, "Round number already exists for this application", ex);
         }
+        cacheEviction.evictUserRecommendations(userId);
         return InterviewResponse.from(interview);
     }
 
@@ -130,12 +135,14 @@ public class InterviewService {
                     ex
             );
         }
+        cacheEviction.evictUserRecommendations(userId);
         return InterviewResponse.from(interview);
     }
 
     @Transactional
     public void delete(UUID userId, UUID id) {
         interviewRepository.delete(requireOwnedInterview(userId, id));
+        cacheEviction.evictUserRecommendations(userId);
     }
 
     private Application requireOwnedApplication(UUID userId, UUID applicationId) {
