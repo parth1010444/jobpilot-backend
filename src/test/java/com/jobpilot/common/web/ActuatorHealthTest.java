@@ -1,4 +1,4 @@
-package com.jobpilot.common.error;
+package com.jobpilot.common.web;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,19 +14,15 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-class GlobalExceptionHandlerTest {
+class ActuatorHealthTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Test
-    void unknownPathReturnsStandardErrorShape() throws Exception {
-        mockMvc.perform(get("/does-not-exist"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.timestamp").exists())
-                .andExpect(jsonPath("$.status").value(404))
-                .andExpect(jsonPath("$.error").value("Not Found"))
-                .andExpect(jsonPath("$.message").exists())
-                .andExpect(jsonPath("$.path").value("/does-not-exist"));
+    void healthIsUp() throws Exception {
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
     }
 }
