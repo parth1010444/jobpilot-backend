@@ -2,7 +2,7 @@
 
 Backend-first intelligent job application tracker. This repository is the primary portfolio deliverable: a **modular monolith** on Spring Boot. A frontend will come much later.
 
-**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications.** Messaging (Kafka), email delivery retries, analytics, and a UI remain out of scope.
+**Current scope: Phase 1 foundation + Phase 2 JWT authentication + Phase 3 application tracking + Phase 4 interview management + Phase 5 resumes and skills + Phase 6 job description analysis / match + Phase 7 recommendation engine + Phase 8 reminders / scheduler / in-app notifications + Phase 9 transactional outbox / Kafka.** Email delivery retries, analytics, and a UI remain out of scope.
 
 ## Architecture
 
@@ -65,15 +65,16 @@ Package root: `com.jobpilot`. Controllers stay thin; business logic lives in ser
 | Persistence | Spring Data JPA + Flyway |
 | Database | PostgreSQL 16 (H2 for tests) |
 | Security | Spring Security + JWT (jjwt) + BCrypt |
+| Messaging | Spring Kafka + transactional outbox |
 | Ops | Spring Boot Actuator (`/actuator/health`) |
 | Packaging | Dockerfile + Docker Compose |
 
-Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql` … `V7__reminders_and_notifications.sql`).
+Hibernate `ddl-auto` is **`none`** on the main profile. Schema changes go through Flyway (`V1__init.sql` … `V7__reminders_and_notifications.sql`, `V8__outbox_events.sql`).
 
 ## Prerequisites
 
 - JDK 21
-- Docker (for PostgreSQL, and optionally the app image)
+- Docker (for PostgreSQL, Kafka, and optionally the app image)
 
 ## Environment variables
 
@@ -613,6 +614,47 @@ curl -sS -X PATCH http://localhost:8080/api/notifications/<notificationId>/read 
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Phase 9 — Transactional outbox + Kafka
+
+Reliable domain-event publishing via the **transactional outbox** pattern. Domain services write a PENDING row to `outbox_events` in the **same database transaction** as the business change; a scheduled relay publishes those rows to Kafka afterward.
+
+### Why outbox
+
+Direct `KafkaTemplate.send` inside a domain transaction can lose events (DB commits, broker send fails) or publish phantom events (send succeeds, DB rolls back). The outbox makes the write durable with the domain change, then relays asynchronously.
+
+### Delivery semantics
+
+**At-least-once.** The relay sends to Kafka first, then marks the row `PUBLISHED`. A crash between those steps can republish the same payload. Consumers must be idempotent (see listener stub). After `jobpilot.outbox.relay.max-attempts` failed sends, the row becomes `FAILED`.
+
+Email delivery retries are intentionally **not** part of Phase 9 — this phase is the messaging backbone only.
+
+### Local Kafka
+
+```bash
+docker compose up -d postgres kafka
+# Kafka (Bitnami legacy image, KRaft, no ZooKeeper) on localhost:9092
+```
+
+Env vars (see `.env.example`): `SPRING_KAFKA_BOOTSTRAP_SERVERS`, `JOBPILOT_OUTBOX_*`, `JOBPILOT_KAFKA_CONSUMER_*`.
+
+### What gets emitted
+
+When an application is created (initial status) or its status transitions via PATCH, `ApplicationService` calls `OutboxPublisher` with `ApplicationStatusChangedEvent` (`applicationId`, `userId`, `fromStatus`, `toStatus`, `occurredAt`). Topic default: `jobpilot.application.events` (partition key = application id).
+
+No public REST API for the outbox — it is an internal reliability mechanism.
+
+### Consumer skeleton
+
+`ApplicationStatusChangedListener` deserializes and logs events. Enable with `jobpilot.kafka.consumer.enabled=true`. Structure leaves room for a future processed-events table; duplicates are expected under at-least-once delivery.
+
+### Tests without Kafka
+
+`./gradlew test` does **not** require a broker:
+
+- `jobpilot.outbox.relay.enabled=false` and `jobpilot.kafka.consumer.enabled=false` in `application-test.yml`
+- Unit tests mock `KafkaTemplate`
+- Integration tests assert PENDING outbox rows after application create/status change
+
 ## Tests and build
 
 Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do not require Docker.
@@ -624,7 +666,7 @@ Tests use an in-memory H2 database (PostgreSQL compatibility mode) so they do no
 
 ## Planned later phases (not implemented)
 
-Phases 9–13 are planned and **not** present here. Expected later work includes email delivery with retries/Kafka, analytics, and a frontend.
+Phases 10–13 are planned and **not** present here. Expected later work includes email delivery with retries, analytics, and a frontend. Do not treat remaining placeholder packages as working features.
 
 ## License
 

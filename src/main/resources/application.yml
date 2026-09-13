@@ -21,6 +21,17 @@ spring:
   web:
     resources:
       add-mappings: false
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    consumer:
+      group-id: ${JOBPILOT_KAFKA_CONSUMER_GROUP_ID:jobpilot-backend}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 server:
   port: ${SERVER_PORT:8080}
@@ -46,6 +57,17 @@ jobpilot:
     scheduler:
       enabled: ${JOBPILOT_REMINDERS_SCHEDULER_ENABLED:true}
       fixed-delay-ms: ${JOBPILOT_REMINDERS_SCHEDULER_FIXED_DELAY_MS:60000}
+  outbox:
+    application-events-topic: ${JOBPILOT_OUTBOX_APPLICATION_EVENTS_TOPIC:jobpilot.application.events}
+    relay:
+      enabled: ${JOBPILOT_OUTBOX_RELAY_ENABLED:true}
+      fixed-delay-ms: ${JOBPILOT_OUTBOX_RELAY_FIXED_DELAY_MS:5000}
+      batch-size: ${JOBPILOT_OUTBOX_RELAY_BATCH_SIZE:50}
+      max-attempts: ${JOBPILOT_OUTBOX_RELAY_MAX_ATTEMPTS:5}
+  kafka:
+    consumer:
+      enabled: ${JOBPILOT_KAFKA_CONSUMER_ENABLED:true}
+      group-id: ${JOBPILOT_KAFKA_CONSUMER_GROUP_ID:jobpilot-backend}
 
 logging:
   pattern:

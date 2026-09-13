@@ -5,7 +5,10 @@ import com.jobpilot.application.dto.CreateApplicationRequest;
 import com.jobpilot.application.dto.UpdateApplicationRequest;
 import com.jobpilot.application.validator.ApplicationStatusTransitionValidator;
 import com.jobpilot.common.error.JobPilotException;
+import com.jobpilot.event.OutboxPublisher;
+import com.jobpilot.event.dto.ApplicationStatusChangedEvent;
 import com.jobpilot.resume.ResumeRepository;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -34,17 +37,23 @@ public class ApplicationService {
     private final ApplicationStatusHistoryRepository historyRepository;
     private final ApplicationStatusTransitionValidator transitionValidator;
     private final ResumeRepository resumeRepository;
+    private final OutboxPublisher outboxPublisher;
+    private final Clock clock;
 
     public ApplicationService(
             ApplicationRepository applicationRepository,
             ApplicationStatusHistoryRepository historyRepository,
             ApplicationStatusTransitionValidator transitionValidator,
-            ResumeRepository resumeRepository
+            ResumeRepository resumeRepository,
+            OutboxPublisher outboxPublisher,
+            Clock clock
     ) {
         this.applicationRepository = applicationRepository;
         this.historyRepository = historyRepository;
         this.transitionValidator = transitionValidator;
         this.resumeRepository = resumeRepository;
+        this.outboxPublisher = outboxPublisher;
+        this.clock = clock;
     }
 
     @Transactional
@@ -52,7 +61,7 @@ public class ApplicationService {
         ApplicationStatus status = request.status() != null ? request.status() : ApplicationStatus.SAVED;
         Instant appliedAt = request.appliedAt();
         if (appliedAt == null && status == ApplicationStatus.APPLIED) {
-            appliedAt = Instant.now();
+            appliedAt = clock.instant();
         }
 
         Application application = new Application(
@@ -74,6 +83,7 @@ public class ApplicationService {
 
         applicationRepository.save(application);
         recordHistory(application.getId(), null, status);
+        publishStatusChanged(application, null, status);
         return ApplicationResponse.from(application);
     }
 
@@ -150,9 +160,10 @@ public class ApplicationService {
             if (oldStatus != newStatus) {
                 application.setStatus(newStatus);
                 if (newStatus == ApplicationStatus.APPLIED && application.getAppliedAt() == null) {
-                    application.setAppliedAt(Instant.now());
+                    application.setAppliedAt(clock.instant());
                 }
                 recordHistory(application.getId(), oldStatus, newStatus);
+                publishStatusChanged(application, oldStatus, newStatus);
             }
         }
 
@@ -174,6 +185,20 @@ public class ApplicationService {
         Application application = requireOwned(userId, id);
         historyRepository.deleteByApplicationId(application.getId());
         applicationRepository.delete(application);
+    }
+
+    private void publishStatusChanged(
+            Application application,
+            ApplicationStatus fromStatus,
+            ApplicationStatus toStatus
+    ) {
+        outboxPublisher.publishApplicationStatusChanged(new ApplicationStatusChangedEvent(
+                application.getId(),
+                application.getUserId(),
+                fromStatus != null ? fromStatus.name() : null,
+                toStatus.name(),
+                clock.instant()
+        ));
     }
 
     private Application requireOwned(UUID userId, UUID id) {
