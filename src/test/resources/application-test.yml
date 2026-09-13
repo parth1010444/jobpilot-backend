@@ -9,3 +9,29 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
+  kafka:
+    bootstrap-servers: localhost:9092
+    listener:
+      auto-startup: false
+
+jobpilot:
+  jwt:
+    secret: test-only-jwt-secret-key-at-least-32-bytes-long!!
+    expiration-ms: 3600000
+  reminders:
+    scheduler:
+      enabled: false
+  outbox:
+    relay:
+      enabled: false
+  kafka:
+    consumer:
+      enabled: false
+  redis:
+    enabled: false
+  rate-limit:
+    enabled: true
+    default-limit: 10000
+    auth-limit: 10000
+    window: 1m
+
