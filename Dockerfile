@@ -16,7 +16,7 @@ WORKDIR /app
 RUN groupadd --system jobpilot \
     && useradd --system --gid jobpilot --home-dir /app --shell /usr/sbin/nologin jobpilot
 
-COPY --from=build /workspace/build/libs/*.jar /app/app.jar
+COPY --from=build /workspace/build/libs/jobpilot.jar /app/app.jar
 
 USER jobpilot
 EXPOSE 8080

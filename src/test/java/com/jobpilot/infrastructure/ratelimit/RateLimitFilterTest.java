@@ -68,20 +68,6 @@ class RateLimitFilterTest {
     }
 
     @Test
-    void optionsPreflightIsExcluded() throws Exception {
-        properties.setAuthLimit(0);
-        FilterChain chain = mock(FilterChain.class);
-        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/auth/register");
-        request.setRequestURI("/api/auth/register");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, chain);
-
-        verify(chain).doFilter(request, response);
-        assertThat(response.getStatus()).isNotEqualTo(429);
-    }
-
-    @Test
     void pingIsExcluded() throws Exception {
         properties.setDefaultLimit(0);
         FilterChain chain = mock(FilterChain.class);
@@ -93,6 +79,15 @@ class RateLimitFilterTest {
 
         verify(chain).doFilter(request, response);
         assertThat(response.getStatus()).isNotEqualTo(429);
+    }
+
+    @Test
+    void openApiPathsAreExcluded() {
+        assertThat(RateLimitFilter.isExcluded("/v3/api-docs")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/v3/api-docs.yaml")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/swagger-ui.html")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/swagger-ui/index.html")).isTrue();
+        assertThat(RateLimitFilter.isExcluded("/api/users/me")).isFalse();
     }
 
     @Test

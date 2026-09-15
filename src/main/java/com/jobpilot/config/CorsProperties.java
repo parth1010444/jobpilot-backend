@@ -8,8 +8,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class CorsProperties {
 
     /**
-     * Browser origins allowed to call the API (scheme + host + port). Required when
-     * the UI is served from a different origin (e.g. Vite on {@code http://localhost:5173}).
+     * Browser origins allowed to call the API. Defaults cover a local Vite
+     * frontend ({@code http://localhost:5173} and {@code http://127.0.0.1:5173}).
+     * Production must override via {@code JOBPILOT_CORS_ALLOWED_ORIGINS}.
      */
     private List<String> allowedOrigins = new ArrayList<>(List.of(
             "http://localhost:5173",
@@ -21,6 +22,6 @@ public class CorsProperties {
     }
 
     public void setAllowedOrigins(List<String> allowedOrigins) {
-        this.allowedOrigins = allowedOrigins != null ? allowedOrigins : List.of();
+        this.allowedOrigins = new ArrayList<>(allowedOrigins != null ? allowedOrigins : List.of());
     }
 }
