@@ -9,16 +9,23 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
-@EnableConfigurationProperties(CorsProperties.class)
+@EnableConfigurationProperties({CorsProperties.class, OpenApiProperties.class})
 public class WebConfiguration {
 
     @Bean
     CorsConfigurationSource corsConfigurationSource(CorsProperties properties) {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(properties.getAllowedOrigins());
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        List<String> origins = properties.getAllowedOrigins() == null
+                ? List.of()
+                : properties.getAllowedOrigins().stream()
+                        .filter(origin -> origin != null && !origin.isBlank())
+                        .toList();
+        if (!origins.isEmpty()) {
+            config.setAllowedOrigins(origins);
+        }
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Retry-After"));
+        config.setExposedHeaders(List.of("Authorization", "Retry-After"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

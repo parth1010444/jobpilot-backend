@@ -18,6 +18,12 @@ jobpilot:
   jwt:
     secret: test-only-jwt-secret-key-at-least-32-bytes-long!!
     expiration-ms: 3600000
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+  openapi:
+    enabled: true
   reminders:
     scheduler:
       enabled: false
