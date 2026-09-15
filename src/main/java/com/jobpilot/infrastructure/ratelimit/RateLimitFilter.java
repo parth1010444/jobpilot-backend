@@ -51,6 +51,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (!properties.isEnabled()) {
             return true;
         }
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String path = request.getRequestURI();
         return isExcluded(path);
     }

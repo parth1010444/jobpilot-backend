@@ -68,6 +68,20 @@ class RateLimitFilterTest {
     }
 
     @Test
+    void optionsPreflightIsExcluded() throws Exception {
+        properties.setAuthLimit(0);
+        FilterChain chain = mock(FilterChain.class);
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/auth/register");
+        request.setRequestURI("/api/auth/register");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        assertThat(response.getStatus()).isNotEqualTo(429);
+    }
+
+    @Test
     void pingIsExcluded() throws Exception {
         properties.setDefaultLimit(0);
         FilterChain chain = mock(FilterChain.class);
